@@ -39,6 +39,7 @@ to be tracked. Never delete an entry; supersede or reopen it instead.
 - **Decision:** Sessions are written to a local `output_dir`. After each Scan, a background thread copies new or changed files to the mounted NAS share (`nas_dir`), checks each copy with SHA-256, and records it in `<output_dir>/.backup.json`. `prune` deletes local files only after re-verifying the NAS copy.
 - **Why:** scanning must never wait on the network or lose work when Wi-Fi drops or the Mac sleeps. Writing straight to the share was rejected for exactly that reason. The tool reads a Finder-mounted folder instead of connecting to the NAS itself, so no NAS password is stored in the tool.
 - **Premises:** the NAS is reachable as an SMB share mounted under `/Volumes`; one `photoscan` process at a time writes the manifest.
+- **Amended (2026-09-24):** at the user's request, `prune --force` bypasses the NAS entirely and deletes all local files, backed up or not (`session.json` kept). It prints how many files were never backed up and asks for confirmation unless `--yes` is given. Plain `prune` keeps the verified-only rule.
 
 ## D-003 (2026-09-24) — Output format
 

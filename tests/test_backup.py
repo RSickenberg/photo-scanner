@@ -1,6 +1,6 @@
 import pytest
 
-from photoscan.backup import NasUnavailable, known_names, prune, sync
+from photoscan.backup import NasUnavailable, known_names, not_backed_up, prune, sync
 
 
 @pytest.fixture
@@ -71,3 +71,24 @@ def test_known_names_remember_pruned_files(local, nas):
     prune(local, nas)
 
     assert "grandma_s001.tif" in known_names(local, local / "2026-09-24_grandma")
+
+
+def test_forced_prune_deletes_everything_local_without_the_nas(local, tmp_path):
+    session = local / "2026-09-24_grandma"
+
+    deleted = prune(local, None, force=True)
+
+    assert len(deleted) == 3  # never backed up, and no NAS at all
+    assert not list(session.glob("*/*"))
+    assert (session / "session.json").exists()  # kept: the Session's record
+
+
+def test_not_backed_up_counts_files_missing_or_changed_since_the_backup(local, nas):
+    sync(local, nas)
+    (local / "2026-09-24_grandma/scans/grandma_s002.tif").write_bytes(b"new")
+    (local / "2026-09-24_grandma/extracts/grandma_s001_p01.jpg").write_bytes(b"rotated")
+
+    assert sorted(p.name for p in not_backed_up(local)) == [
+        "grandma_s001_p01.jpg",
+        "grandma_s002.tif",
+    ]

@@ -87,3 +87,20 @@ def test_calibration_can_be_skipped_then_done_mid_session(setup):
     # Skipped at the start, so the first Scan is uncalibrated; `c` then calibrates.
     assert record["scans"][0]["calibration"] is None
     assert [c["id"] for c in record["calibrations"]] == ["cal_01"]
+
+
+def test_forced_prune_warns_about_files_not_on_the_nas(setup, tmp_path, monkeypatch):
+    local, _, _ = setup
+    CliRunner().invoke(cli.app, ["session", "Grandma", "--no-calibrate"], input="\n\nq\n")
+    cfg = tmp_path / "no-nas.toml"
+    cfg.write_text(f'output_dir = "{local}"\n')  # no NAS configured at all
+    monkeypatch.setenv("PHOTOSCAN_CONFIG", str(cfg))
+
+    refused = CliRunner().invoke(cli.app, ["prune", "--force"], input="n\n")
+    assert "NOT on the NAS" in refused.output
+    assert list(local.glob("*/extracts/*"))
+
+    result = CliRunner().invoke(cli.app, ["prune", "--force", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert not list(local.glob("*/extracts/*"))
+    assert not list(local.glob("*/scans/*"))

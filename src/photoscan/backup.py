@@ -48,8 +48,17 @@ def sync(local: Path, nas: Path) -> SyncReport:
     return report
 
 
-def prune(local: Path, nas: Path) -> list[Path]:
-    """Delete local files whose NAS copy is re-verified identical right now."""
+def prune(local: Path, nas: Path | None, *, force: bool = False) -> list[Path]:
+    """Delete local files whose NAS copy is re-verified identical right now.
+
+    `force` skips the NAS entirely and deletes every local file, backed up or
+    not (see `not_backed_up` to warn first). `session.json` is always kept.
+    """
+    if force:
+        doomed = [p for p in _local_files(local) if p.name not in _NEVER_PRUNED]
+        for path in doomed:
+            path.unlink()
+        return doomed
     _require_mounted(nas)
     manifest = _load(local)
     deleted = []
@@ -62,6 +71,17 @@ def prune(local: Path, nas: Path) -> list[Path]:
             path.unlink()
             deleted.append(path)
     return deleted
+
+
+def not_backed_up(local: Path) -> list[Path]:
+    """Local files with no verified NAS copy of their current content."""
+    manifest = _load(local)
+    return [
+        p
+        for p in _local_files(local)
+        if p.name not in _NEVER_PRUNED
+        and manifest.get(p.relative_to(local).as_posix()) != _sha256(p)
+    ]
 
 
 def known_names(local: Path, session_path: Path) -> list[str]:

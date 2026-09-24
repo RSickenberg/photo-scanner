@@ -119,8 +119,29 @@ def sync() -> None:
 
 
 @app.command()
-def prune(yes: Annotated[bool, typer.Option("--yes", help="Don't ask")] = False) -> None:
+def prune(
+    yes: Annotated[bool, typer.Option("--yes", help="Don't ask")] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Skip the NAS: delete ALL local files, even those never backed up",
+        ),
+    ] = False,
+) -> None:
     """Delete local files whose NAS copy is verified identical."""
+    if force:
+        cfg = config.load()
+        if not yes:
+            lost = backup.not_backed_up(cfg.output_dir)
+            typer.secho(
+                f"{len(lost)} local file(s) are NOT on the NAS and will be lost for good.",
+                fg="red" if lost else None,
+            )
+            typer.confirm(f"Delete ALL Scans and Extracts in {cfg.output_dir}?", abort=True)
+        deleted = backup.prune(cfg.output_dir, None, force=True)
+        typer.echo(f"{len(deleted)} local file(s) deleted")
+        return
     cfg = _require_nas(config.load())
     if not yes:
         typer.confirm(f"Delete backed-up files from {cfg.output_dir}?", abort=True)

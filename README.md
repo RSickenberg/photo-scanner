@@ -123,6 +123,7 @@ removes it from the record, and `recut` updates its Extracts and adds a
 | `photoscan rotate FILE… --degrees 90` | Turn Extracts clockwise (TIFF and JPEG together) |
 | `photoscan sync` | Copy anything not yet on the NAS, verifying each file |
 | `photoscan prune` | Delete local files whose NAS copy is verified identical |
+| `photoscan prune --force` | Delete **all** local Scans and Extracts without checking the NAS. Warns how many were never backed up; `--yes` skips the question |
 | `photoscan devices` / `config` | Scanner list / config file |
 
 ## NAS backup
