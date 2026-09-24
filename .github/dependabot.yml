@@ -1,0 +1,32 @@
+version: 2
+updates:
+    -   package-ecosystem: github-actions
+        directory: "/"
+        schedule:
+            interval: weekly
+        groups:
+            actions:
+                patterns: ["*"]
+    -   package-ecosystem: uv
+        directory: "/"
+        allow:
+            -   dependency-type: direct
+        schedule:
+            interval: daily
+        open-pull-requests-limit: 10
+        groups:
+            dev-dependencies:
+                dependency-type: "development"
+            prod-dependencies:
+                dependency-type: "production"
+    # Release tooling only (release-it & co), see package.json.
+    -   package-ecosystem: npm
+        directory: "/"
+        versioning-strategy: increase-if-necessary
+        allow:
+            -   dependency-type: direct
+        schedule:
+            interval: weekly
+        groups:
+            release-tooling:
+                patterns: ["*"]
