@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from photoscan.backup import NasUnavailable, not_backed_up, prune, sync
+from photoscan.backup import NasUnavailable, delete_all, not_backed_up, prune, sync
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def test_sync_keeps_file_modification_times(local, nas):
 def test_forced_prune_deletes_everything_local_without_the_nas(local, tmp_path):
     session = local / "2026-09-24_grandma"
 
-    deleted = prune(local, None, force=True)
+    deleted = delete_all(local)
 
     assert len(deleted) == 3  # never backed up, and no NAS at all
     assert not list(session.glob("*/*"))

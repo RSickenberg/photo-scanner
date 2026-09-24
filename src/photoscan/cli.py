@@ -11,9 +11,10 @@ import numpy as np
 import typer
 
 from photoscan import backup, config, scanners
-from photoscan.archive import Archive, Session, Source
+from photoscan.archive import Archive, ScanResult, Session, Source
 from photoscan.dates import PhotoDate
-from photoscan.detect import find_prints
+from photoscan.detect import Region
+from photoscan.imagefiles import to_8bit
 from photoscan.scanners import Scanner, ScannerError
 
 app = typer.Typer(
@@ -22,6 +23,7 @@ app = typer.Typer(
 )
 
 DATE_HELP = "1985-06-15, 1985-06, 1985, 1980s, ~1985 (approximate)"
+_PREVIEW_LONG_SIDE = 1200  # px: plenty to check the cuts, quick to open
 
 
 def make_scanner(cfg: config.Config) -> Scanner:
@@ -92,32 +94,13 @@ def session(
             elif answer == "b":
                 if last is None:
                     typer.echo("Scan the fronts first; b then scans their Backs.")
-                    continue
-                typer.prompt(
-                    "Flip every Print in place (same spot), then Enter",
-                    default="",
-                    show_default=False,
-                )
-                image = _scan(scanner, cfg.back_dpi, False)
-                if image is None:
-                    continue
-                result = sitting.add_back(last[0], last[1], image, cfg.back_dpi)
-                typer.echo(f"{len(result.matched)} Back(s) matched to their fronts")
-                for name in result.unmatched:
-                    typer.secho(f"Unmatched Back kept as {name}", fg="yellow")
-                backup_now()
-            elif answer == "":
-                image = _scan(scanner, dpi, deep)
-                if image is None:
-                    continue
-                result = sitting.add_scan(current, image, dpi, scanner=scanner.name, typed=typed)
-                typer.echo(f"{result.scan}: {len(result.extracts)} Extract(s)")
-                if preview and _rejected_after_preview(image, dpi, sitting, cfg):
-                    current.discard(result.scan)
-                    typer.echo("Discarded; rearrange the Prints and scan again.")
-                    continue
-                last = (current, result.scan)
-                total += len(result.extracts)
+                elif _scan_backs(sitting, *last, scanner, cfg.back_dpi):
+                    backup_now()
+            elif answer == "" and (
+                scanned := _scan_fronts(sitting, current, scanner, dpi, deep, typed, preview)
+            ):
+                last = (current, scanned.scan)
+                total += len(scanned.extracts)
                 backup_now()
     finally:
         if syncer:
@@ -222,7 +205,7 @@ def prune(
                 fg="red" if lost else None,
             )
             typer.confirm(f"Delete ALL Scans and Extracts in {cfg.output_dir}?", abort=True)
-        deleted = backup.prune(cfg.output_dir, None, force=True)
+        deleted = backup.delete_all(cfg.output_dir)
         typer.echo(f"{len(deleted)} local file(s) deleted")
         return
     cfg = _require_nas(_config())
@@ -303,6 +286,42 @@ def _reuse_calibration(
     return True
 
 
+def _scan_fronts(
+    sitting: Session,
+    source: Source,
+    scanner: Scanner,
+    dpi: int,
+    deep: bool,
+    typed: PhotoDate | None,
+    preview: bool,
+) -> ScanResult | None:
+    """Scan the Prints on the glass into `source`; None if it failed or was discarded."""
+    image = _scan(scanner, dpi, deep)
+    if image is None:
+        return None
+    result = sitting.add_scan(source, image, dpi, scanner=scanner.name, typed=typed)
+    typer.echo(f"{result.scan}: {len(result.extracts)} Extract(s)")
+    if preview and _rejected_after_preview(image, source, result.scan):
+        source.discard(result.scan)
+        typer.echo("Discarded; rearrange the Prints and scan again.")
+        return None
+    return result
+
+
+def _scan_backs(sitting: Session, source: Source, scan: str, scanner: Scanner, dpi: int) -> bool:
+    """Scan the flipped Prints of `scan` and pair their Backs; False if the scan failed."""
+    flip = "Flip every Print in place (same spot), then Enter"
+    typer.prompt(flip, default="", show_default=False)
+    image = _scan(scanner, dpi, False)
+    if image is None:
+        return False
+    result = sitting.add_back(source, scan, image, dpi)
+    typer.echo(f"{len(result.matched)} Back(s) matched to their fronts")
+    for name in result.unmatched:
+        typer.secho(f"Unmatched Back kept as {name}", fg="yellow")
+    return True
+
+
 def _scan(scanner: Scanner, dpi: int, deep: bool) -> np.ndarray | None:
     try:
         return scanner.scan(dpi, deep=deep)
@@ -363,23 +382,15 @@ def _require_nas(cfg: config.Config) -> config.Config:
     return cfg
 
 
-def _rejected_after_preview(
-    image: np.ndarray, dpi: int, sitting: Session, cfg: config.Config
-) -> bool:
-    """Open the Scan with numbered boxes in Preview.app; ask whether to keep it."""
-    small = (image >> 8).astype(np.uint8) if image.dtype == np.uint16 else image
-    scale = 1200 / max(small.shape[:2])
-    small = np.ascontiguousarray(cv2.resize(small, None, fx=scale, fy=scale))
-    regions = find_prints(
-        image, dpi, min_side_cm=cfg.cut.min_side_cm, calibration=sitting.calibration
-    )
-    for i, r in enumerate(regions, start=1):
-        rect = ((r.center[0] * scale, r.center[1] * scale),
-                (r.size[0] * scale, r.size[1] * scale), r.angle)  # fmt: skip
-        box = cv2.boxPoints(rect).astype(np.int32)
+def _rejected_after_preview(image: np.ndarray, source: Source, scan: str) -> bool:
+    """Open the Scan in Preview.app with the cuts just made, numbered; ask to keep it."""
+    scale = _PREVIEW_LONG_SIDE / max(image.shape[:2])
+    small = cv2.resize(to_8bit(image), None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    for i, item in enumerate(source.entry(scan)["extracts"], start=1):
+        box = Region.from_list(item["region"]).scaled(scale).box().astype(np.int32)
         cv2.polylines(small, [box], True, (255, 40, 40), 3)
-        cv2.putText(small, str(i), tuple(box.mean(axis=0).astype(int)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 40, 40), 4)  # fmt: skip
+        label_at = tuple(box.mean(axis=0).astype(int))
+        cv2.putText(small, str(i), label_at, cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 40, 40), 4)
     path = Path(tempfile.gettempdir()) / "photoscan-preview.jpg"
     cv2.imwrite(str(path), cv2.cvtColor(small, cv2.COLOR_RGB2BGR))
     subprocess.run(["open", str(path)], check=False)

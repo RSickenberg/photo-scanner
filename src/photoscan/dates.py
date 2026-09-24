@@ -25,6 +25,8 @@ _MONTHS = {
     **dict.fromkeys(["decembre", "décembre", "december", "dezember", "dec", "dez", "déc"], 12),
 }
 _MONTH_WORDS = "|".join(sorted(_MONTHS, key=len, reverse=True))
+# Among several dates read off a Print, the most precise wins.
+_PRECISION_RANK = {"day": 0, "month": 1, "year": 2, "decade": 3}
 
 
 @dataclass(frozen=True)
@@ -149,8 +151,7 @@ def choose_date(
         if found := [d for t in texts for d in find_dates(t)]:
             # Most precise first; then the earliest, since a picture is taken
             # before it's printed (e.g. taken 1999-12-25, printed 03.2000).
-            rank = {"day": 0, "month": 1, "year": 2, "decade": 3}
-            return min(found, key=lambda d: (rank[d.precision], d.first_day())), source
+            return min(found, key=lambda d: (_PRECISION_RANK[d.precision], d.first_day())), source
     if estimate:
         return estimate, "source"
     return None, None

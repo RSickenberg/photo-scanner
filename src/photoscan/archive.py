@@ -102,6 +102,14 @@ class Archive:
         session.save()
         return session
 
+    def add_calibration(self, cal_id: str, empty: np.ndarray, dpi: int) -> Calibration:
+        """Keep an empty-glass Scan under `cal_id` and learn from it."""
+        folder = self.archive / "_calibrations"
+        folder.mkdir(parents=True, exist_ok=True)
+        write_tiff(folder / f"{cal_id}.tif", empty, Meta("Calibration", datetime.now(), dpi))
+        self._calibrations[cal_id] = detect.calibrate(empty, dpi)
+        return self._calibrations[cal_id]
+
     def calibration(self, cal_id: str | None) -> Calibration | None:
         """A calibration by id; None if there's none, or its empty-glass Scan was pruned."""
         if cal_id is None:
@@ -120,16 +128,17 @@ class Archive:
         """The latest calibration (id, time) made on this scanner at this dpi within
         `max_age`, if its empty-glass Scan is still on disk (it may have been pruned)."""
         now = now or datetime.now()
-        best: tuple[datetime, str] | None = None
-        for record in (self.archive / "_sessions").glob("*.json"):
-            for cal in json.loads(record.read_text()).get("calibrations", []):
-                if cal.get("reused") or cal["scanner"] != scanner or cal["dpi"] != dpi:
-                    continue
-                made = datetime.fromisoformat(cal["calibrated_at"])
-                usable = (self.archive / "_calibrations" / f"{cal['id']}.tif").exists()
-                if usable and now - made <= max_age and (best is None or made > best[0]):
-                    best = (made, cal["id"])
-        return (best[1], best[0]) if best else None
+        usable = [
+            (cal["id"], datetime.fromisoformat(cal["calibrated_at"]))
+            for record in (self.archive / "_sessions").glob("*.json")
+            for cal in json.loads(record.read_text()).get("calibrations", [])
+            if not cal.get("reused")
+            and cal["scanner"] == scanner
+            and cal["dpi"] == dpi
+            and (self.archive / "_calibrations" / f"{cal['id']}.tif").exists()
+        ]
+        recent = [(cal_id, made) for cal_id, made in usable if now - made <= max_age]
+        return max(recent, key=lambda c: c[1], default=None)
 
     def locate(self, path: Path) -> tuple["Source", str]:
         """The Source and Extract (or Scan) name behind a photo, master or Scan path."""
@@ -171,11 +180,7 @@ class Session:
     def calibrate(self, empty: np.ndarray, dpi: int, *, scanner: str | None = None) -> Calibration:
         """Learn the empty glass (background, dust); the Session's next Scans use it."""
         cal_id = f"{self.id}_cal_{len(self._record['calibrations']) + 1:02d}"
-        folder = self.archive.archive / "_calibrations"
-        folder.mkdir(parents=True, exist_ok=True)
-        write_tiff(folder / f"{cal_id}.tif", empty, Meta("Calibration", datetime.now(), dpi))
-        calibration = detect.calibrate(empty, dpi)
-        self.archive._calibrations[cal_id] = calibration
+        calibration = self.archive.add_calibration(cal_id, empty, dpi)
         self._record["calibrations"].append(
             {
                 "id": cal_id,
@@ -267,6 +272,11 @@ class Source:
     def back(self, name: str) -> Path:
         return self.path / "backs" / f"{name}.jpg"
 
+    def _make_folders(self) -> None:
+        for folder in ("scans", "masters", "backs"):
+            (self.path / folder).mkdir(parents=True, exist_ok=True)
+        (self.archive.photos / self.slug).mkdir(parents=True, exist_ok=True)
+
     # --- changes ---------------------------------------------------------------
 
     def add_scan(
@@ -293,7 +303,7 @@ class Source:
             "back_scan": None,
             "unmatched_backs": [],
         }
-        self.scan_file(name).parent.mkdir(parents=True, exist_ok=True)
+        self._make_folders()
         write_tiff(self.scan_file(name), scan, self._meta(entry))
         entry["extracts"] = self._cut(scan, entry)
         self.scans.append(entry)
@@ -305,6 +315,7 @@ class Source:
     ) -> BackResult:
         """Pair a Scan of the flipped Prints with the fronts, read their text, re-date."""
         entry = self.entry(scan)
+        self._make_folders()
         entry["back_scan"] = f"{scan}_back"
         entry["back_calibration"] = calibration
         entry["back_dpi"] = dpi  # may be lower than the front's: only text is needed
@@ -317,6 +328,7 @@ class Source:
     def recut(self, scan: str) -> ScanResult:
         """Redo a Scan's Extracts (and Backs), with its own calibration and typed date."""
         entry = self.entry(scan)
+        self._make_folders()
         self._remove_outputs(scan, keep_scans=True)
         image, _ = read_tiff(self.scan_file(scan))
         entry["extracts"] = self._cut(image, entry)
@@ -392,8 +404,6 @@ class Source:
                 "back": None,
                 "dust_repaired": dust,
             }
-            self.master(item["name"]).parent.mkdir(parents=True, exist_ok=True)
-            self.photo(item["name"]).parent.mkdir(parents=True, exist_ok=True)
             self._stamp(entry, item, image)
             items.append(item)
         return items
@@ -421,7 +431,6 @@ class Source:
             if gaps and min(gaps.values()) <= tolerance:
                 pieces[min(gaps, key=gaps.get)].append(b)
                 unmatched.remove(b)
-        self.back("x").parent.mkdir(parents=True, exist_ok=True)
         meta = self._meta(entry, dpi=dpi)
         matched = {}
         for f, item in enumerate(entry["extracts"]):

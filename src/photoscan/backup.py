@@ -49,17 +49,9 @@ def sync(local: Path, nas: Path) -> SyncReport:
     return report
 
 
-def prune(local: Path, nas: Path | None, *, force: bool = False) -> list[Path]:
+def prune(local: Path, nas: Path) -> list[Path]:
     """Delete local files whose NAS copy is re-verified identical right now.
-
-    `force` skips the NAS entirely and deletes every local file, backed up or
-    not (see `not_backed_up` to warn first). `session.json` is always kept.
-    """
-    if force:
-        doomed = [p for p in _local_files(local) if p.suffix != _KEEP_SUFFIX]
-        for path in doomed:
-            path.unlink()
-        return doomed
+    Records (*.json) are always kept."""
     _require_mounted(nas)
     manifest = _load(local)
     deleted = []
@@ -72,6 +64,15 @@ def prune(local: Path, nas: Path | None, *, force: bool = False) -> list[Path]:
             path.unlink()
             deleted.append(path)
     return deleted
+
+
+def delete_all(local: Path) -> list[Path]:
+    """Delete every local image, backed up or not, without looking at the NAS
+    (`prune --force`; see `not_backed_up` to warn first). Records are kept."""
+    doomed = [p for p in _local_files(local) if p.suffix != _KEEP_SUFFIX]
+    for path in doomed:
+        path.unlink()
+    return doomed
 
 
 def not_backed_up(local: Path) -> list[Path]:
