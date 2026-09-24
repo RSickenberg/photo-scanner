@@ -7,8 +7,12 @@ import numpy as np
 
 # Detection runs on a downscaled copy: plenty to find photo edges, much faster.
 _DETECT_LONG_SIDE = 1200
-# Minimum colour distance from the background to count as "not glass".
-_MIN_CONTRAST = 25.0
+# Colour distance (Lab) from the background above which a pixel is "not glass".
+# Adaptive to the background's own noise, never below _MIN_CONTRAST. Low on
+# purpose: Polaroid frames on the white lid sit only ~12 units away (measured on
+# a real LiDE 400 Scan, lid noise p99 ~3).
+_MIN_CONTRAST = 8.0
+_NOISE_FACTOR = 2.5
 
 
 @dataclass(frozen=True)
@@ -65,23 +69,29 @@ def _downscale(img: np.ndarray) -> tuple[np.ndarray, float]:
 
 def _foreground_mask(img: np.ndarray) -> np.ndarray:
     """White where something differs from the glass/lid background."""
-    lab = cv2.cvtColor(cv2.GaussianBlur(img, (5, 5), 0), cv2.COLOR_RGB2LAB).astype(np.float32)
-    background = _background_colour(lab)
+    # Median, not Gaussian: removes noise without smearing edges outwards, which a
+    # low threshold would otherwise count as part of the Print.
+    lab = cv2.cvtColor(cv2.medianBlur(img, 5), cv2.COLOR_RGB2LAB).astype(np.float32)
+    background, noise = _background(lab)
     distance = np.linalg.norm(lab - background, axis=-1)
     distance = np.clip(distance, 0, 255).astype(np.uint8)
 
-    otsu, _ = cv2.threshold(distance, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    _, mask = cv2.threshold(distance, max(otsu, _MIN_CONTRAST), 255, cv2.THRESH_BINARY)
+    # Not Otsu: a high-contrast photo drags Otsu's split far above pale frames
+    # and skies, which then get cut off as if they were background.
+    threshold = max(_MIN_CONTRAST, _NOISE_FACTOR * noise)
+    _, mask = cv2.threshold(distance, threshold, 255, cv2.THRESH_BINARY)
 
     # Close gaps where a Print is locally close to the background colour
-    # (dark sky on a dark cloth), then drop specks.
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    return cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    # (dark sky on a dark cloth), then drop specks and thin slivers, like the
+    # scanner's vignetting along the glass edge, that would stretch a Print's box.
+    close = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close, iterations=2)
+    open_ = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    return cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_)
 
 
-def _background_colour(lab: np.ndarray) -> np.ndarray:
-    """Most common colour along the Scan's outer edge.
+def _background(lab: np.ndarray) -> tuple[np.ndarray, float]:
+    """Most common colour along the Scan's outer edge, and how much it varies.
 
     The mode, not the mean: Prints pushed against the glass edge cover part of
     it, but the background still wins as long as it shows along most of it.
@@ -97,7 +107,10 @@ def _background_colour(lab: np.ndarray) -> np.ndarray:
     quantised = (border // 8).astype(np.int32)
     keys, counts = np.unique(quantised, axis=0, return_counts=True)
     winner = keys[counts.argmax()]
-    return border[(quantised == winner).all(axis=1)].mean(axis=0)
+    pixels = border[(quantised == winner).all(axis=1)]
+    colour = pixels.mean(axis=0)
+    noise = float(np.percentile(np.linalg.norm(pixels - colour, axis=-1), 99))
+    return colour, noise
 
 
 def _normalise(cx: float, cy: float, w: float, h: float, angle: float) -> Region:

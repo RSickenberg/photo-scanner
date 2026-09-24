@@ -15,6 +15,7 @@ class FakePrint:
     size: tuple[int, int]  # px, (width, height)
     angle: float = 0.0  # degrees, counter-clockwise
     border: bool = False  # classic white border around the image
+    frame: tuple[int, int, int] | None = None  # Polaroid-style wide frame of this colour
 
 
 def _texture(width: int, height: int, rng: np.random.Generator) -> np.ndarray:
@@ -52,6 +53,12 @@ def make_scan(
         if p.border:
             b = max(4, min(w, h) // 20)
             content[:b], content[-b:], content[:, :b], content[:, -b:] = 250, 250, 250, 250
+        if p.frame:
+            # Polaroid: wide frame, high-contrast picture (dark and bright areas).
+            f = min(w, h) // 8
+            content[:f], content[-f:], content[:, :f], content[:, -f:] = [p.frame] * 4
+            content[f : h // 2, f:-f] = 20
+            content[h // 2 : -f, f:-f] = 235
         # Paste the (possibly rotated) print through a mask.
         m = cv2.getRotationMatrix2D((w / 2, h / 2), p.angle, 1.0)
         m[0, 2] += p.center[0] - w / 2

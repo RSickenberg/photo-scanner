@@ -96,3 +96,21 @@ def test_16_bit_scan_gives_16_bit_extracts():
 
     assert extract.dtype == np.uint16
     assert extract.shape[1] == pytest.approx(450, abs=10)
+
+
+def test_polaroids_on_the_white_lid_keep_their_frame():
+    # Real case (2026-09-24): bluish-white frames only ~12 Lab units from the
+    # lid; the high-contrast picture inside must not raise the threshold above them.
+    frame = (226, 231, 240)
+    scan = make_scan(
+        [FakePrint((300, 500), (450, 540), frame=frame),
+         FakePrint((900, 500), (450, 540), angle=2, frame=frame)],
+        background=WHITE,
+    )  # fmt: skip
+
+    extracts = _extracts(scan)
+
+    assert len(extracts) == 2
+    for extract in extracts:
+        assert extract.shape[1] == pytest.approx(450, abs=10)
+        assert extract.shape[0] == pytest.approx(540, abs=10)
