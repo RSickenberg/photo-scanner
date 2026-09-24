@@ -56,3 +56,11 @@ to be tracked. Never delete an entry; supersede or reopen it instead.
 - **Why:** same `npm run release` as the other projects. A Python-native release tool was rejected to keep one process across repos.
 - **Premises:** Node is available on the release machine.
 
+## D-005 (2026-09-24) — Scanner backends behind a protocol; SANE reads each device's options
+
+- **Status:** decided
+- **Foundational:** yes
+- **Decision:** scanner access lives in `photoscan/scanners/`: a `Scanner` protocol (`name`, `scan`, `devices`) and `create(backend, device)`, selected by `backend` in the config (only `"sane"` today). The SANE backend doesn't hard-code option names. It reads `scanimage --all-options` once per device and picks the colour mode, plus a 16-bit mode (`48 bits…`) or `--depth 16`, whichever the device offers. The device name is recorded with each Scan in `session.json`.
+- **Why:** the user wants the tool open to more scanners. The pixma backend names 16-bit `--mode "48 bits color"` and has no `--depth`, which broke the first real scan, while other backends do the opposite. Reading options per device covers all SANE scanners without per-model code. The backend registry is the seam for scanners SANE can't drive (e.g. ImageCaptureCore, ADR 0001). A plugin/entry-point system was rejected as overkill for a one-person tool.
+- **Premises:** SANE backends expose their colour mode as `Color` and 16-bit either as a `48…` mode or a `--depth` choice of `16` (true for pixma, genesys, epson2 as of sane-backends 1.x).
+

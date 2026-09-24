@@ -33,7 +33,7 @@ release tooling (release-it); the version source is `VERSION`.
 
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `chore:`, `build(recipe):`, …) — `.release-it.ts` + `auto-changelog` turn these into `CHANGELOG.md` entries automatically.
 - Branch `main` is what `release-it` requires and pushes tags to; day-to-day work happens on `dev` (or feature branches), merged in via PR.
-- `src/photoscan/scanner.py` is the only module that knows about SANE; keep it that way so the Swift/ImageCaptureCore fallback (ADR 0001) stays a contained swap.
+- `src/photoscan/scanners/` is the only package that knows how Scans are obtained. Everything else uses the `Scanner` protocol. A new kind of scanner means a new backend module registered in `scanners.create`, and no changes elsewhere. The SANE backend reads each device's options (`scanimage --all-options`), so never hard-code one model's option names.
 - Test images are generated (`tests/synthetic.py`). Never commit real Scans or photos: the repo is public. `.gitignore` blocks image files.
 - Every piece of detection/cutting logic gets a synthetic-scan test first (TDD).
 

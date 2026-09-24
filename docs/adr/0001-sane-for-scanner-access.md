@@ -18,8 +18,11 @@ reach the scanner:
 ## Decision
 
 Use Python + SANE + OpenCV. Scanner access sits behind a single narrow
-interface ("give me a Scan at N dpi") so the backend can be replaced without
-touching detection, cutting, or storage.
+interface ("give me a Scan at N dpi"), the `Scanner` protocol in
+`photoscan.scanners`, so the backend can be replaced without touching
+detection, cutting, or storage. The backend is chosen in config
+(`backend = "sane"`), and the SANE backend adapts to each device's own option
+names, so any SANE-supported scanner should work, not just the LiDE 400.
 
 ## Consequences
 

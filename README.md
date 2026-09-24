@@ -1,7 +1,7 @@
 # photo-scanner
 
-Back up old family photos quickly: put several Prints on a **Canon CanoScan
-LiDE 400**, press Enter, and `photoscan` scans the glass, finds each Print,
+Back up old family photos quickly: put several Prints on a flatbed scanner
+(built and tested with a **Canon CanoScan LiDE 400**), press Enter, and `photoscan` scans the glass, finds each Print,
 straightens it and saves it as its own file. It then backs everything up to
 your NAS. macOS only.
 
@@ -17,8 +17,16 @@ Words used below (see [CONTEXT.md](CONTEXT.md)):
 brew install sane-backends   # scanner driver (scanimage)
 uv tool install git+https://github.com/RSickenberg/photo-scanner
 photoscan config             # creates ~/.config/photoscan/config.toml; set nas_dir there
-photoscan devices            # should list the LiDE 400 (pixma:...)
+photoscan devices            # should list your scanner, e.g. pixma:04A91912_…
 ```
+
+### Other scanners
+
+Any scanner [supported by SANE](http://www.sane-project.org/sane-supported-devices.html)
+should work: `photoscan` reads each scanner's own options and picks its
+colour and 16-bit modes. The first scanner found is used; set `device` in the
+config to choose one. Scanners SANE can't drive need a new backend in
+`src/photoscan/scanners/`, selected with `backend = "..."` in the config.
 
 ## Use
 
@@ -53,6 +61,30 @@ Each Session produces:
 
 The Label and the date are embedded in every file (XMP title/description,
 EXIF/TIFF date).
+
+`session.json` keeps a record of the Session: for every Scan, when it was
+scanned, by which scanner, at which dpi and bit depth, and which Extracts came
+out of it. It also holds running totals. Discarding a Scan from the preview
+removes it from the record, and `recut` updates its Extracts and adds a
+`recut_at` time.
+
+```json
+{
+  "label": "Grandma album 1970s",
+  "date": "2026-09-24",
+  "scans": [
+    {
+      "scan": "grandma-album-1970s_s001",
+      "scanned_at": "2026-09-24T19:02:11",
+      "scanner": "pixma:04A91912_4FA05A",
+      "dpi": 600,
+      "bits": 8,
+      "extracts": ["grandma-album-1970s_s001_p01", "grandma-album-1970s_s001_p02"]
+    }
+  ],
+  "totals": { "scans": 1, "extracts": 2 }
+}
+```
 
 | Command | What it does |
 |---|---|

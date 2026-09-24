@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime
 
 import numpy as np
 import pytest
@@ -135,3 +135,62 @@ def test_load_reopens_a_session_from_its_folder(tmp_path, two_print_scan):
     session = Session.load(path)
 
     assert (session.label, session.day, session.path) == ("Grand-mère", DAY, path)
+
+
+def _record(session):
+    return json.loads((session.path / "session.json").read_text())
+
+
+def test_session_json_records_each_scan_with_its_extracts(tmp_path, two_print_scan):
+    session = Session.open(tmp_path, "Grandma", DAY)
+
+    session.add_scan(two_print_scan, DPI, scanner="pixma:04A91912")
+
+    record = _record(session)
+    (scan,) = record["scans"]
+    assert scan["scan"] == "grandma_s001"
+    assert scan["extracts"] == ["grandma_s001_p01", "grandma_s001_p02"]
+    assert scan["scanner"] == "pixma:04A91912"
+    assert (scan["dpi"], scan["bits"]) == (DPI, 8)
+    assert datetime.fromisoformat(scan["scanned_at"])
+    assert record["totals"] == {"scans": 1, "extracts": 2}
+
+
+def test_record_survives_reopening_the_session(tmp_path, two_print_scan):
+    Session.open(tmp_path, "Grandma", DAY).add_scan(two_print_scan, DPI)
+
+    session = Session.open(tmp_path, "Grandma", DAY)
+    session.add_scan(two_print_scan, DPI)
+
+    assert [s["scan"] for s in _record(session)["scans"]] == ["grandma_s001", "grandma_s002"]
+    assert _record(session)["totals"] == {"scans": 2, "extracts": 4}
+
+
+def test_record_follows_discard_and_recut(tmp_path, two_print_scan):
+    session = Session.open(tmp_path, "Grandma", DAY)
+    first = session.add_scan(two_print_scan, DPI)
+    discarded = session.add_scan(two_print_scan, DPI)
+    session.discard(discarded.scan)
+    tifffile.imwrite(
+        first.scan,
+        make_scan([FakePrint((600, 700), (450, 300))]),
+        photometric="rgb",
+        resolution=(DPI, DPI),
+    )
+
+    session.recut(first.scan)
+
+    (scan,) = _record(session)["scans"]
+    assert scan["extracts"] == ["grandma_s001_p01"]
+    assert datetime.fromisoformat(scan["recut_at"])
+    assert _record(session)["totals"] == {"scans": 1, "extracts": 1}
+
+
+def test_session_from_before_records_existed_still_opens(tmp_path, two_print_scan):
+    path = Session.folder(tmp_path, "Grandma", DAY)
+    path.mkdir()
+    (path / "session.json").write_text('{"label": "Grandma", "date": "2026-09-24"}')
+
+    Session.load(path).add_scan(two_print_scan, DPI)
+
+    assert json.loads((path / "session.json").read_text())["totals"]["scans"] == 1

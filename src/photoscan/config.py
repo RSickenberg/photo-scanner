@@ -22,7 +22,12 @@ min_print_cm = 2.5   # shorter side; anything smaller is treated as dust
 inset_px = 2         # cut this far inside each Print's edge
 jpeg_quality = 95
 
+# How scanners are driven. "sane" covers every scanner SANE supports
+# (http://www.sane-project.org/sane-supported-devices.html).
+backend = "sane"
+
 # Only needed if several scanners are attached; see `photoscan devices`.
+# Without it, the first scanner found is used.
 # device = "pixma:04A91912"
 """
 
@@ -32,6 +37,7 @@ class Config:
     output_dir: Path = Path("~/Pictures/photoscan").expanduser()
     nas_dir: Path | None = None
     dpi: int = 600
+    backend: str = "sane"
     device: str | None = None
     cut: CutSettings = CutSettings()
 
@@ -50,6 +56,7 @@ def load(path: Path | None = None) -> Config:
         output_dir=Path(raw.get("output_dir", defaults.output_dir)).expanduser(),
         nas_dir=Path(raw["nas_dir"]).expanduser() if raw.get("nas_dir") else None,
         dpi=int(raw.get("dpi", defaults.dpi)),
+        backend=raw.get("backend", defaults.backend),
         device=raw.get("device"),
         cut=CutSettings(
             min_side_cm=float(raw.get("min_print_cm", defaults.cut.min_side_cm)),

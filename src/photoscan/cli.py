@@ -10,9 +10,9 @@ import cv2
 import numpy as np
 import typer
 
-from photoscan import backup, config
+from photoscan import backup, config, scanners
 from photoscan.detect import find_prints
-from photoscan.scanner import SaneScanner, Scanner, ScannerError
+from photoscan.scanners import Scanner, ScannerError
 from photoscan.session import Session, rotate_extract
 
 app = typer.Typer(
@@ -22,7 +22,7 @@ app = typer.Typer(
 
 
 def make_scanner(cfg: config.Config) -> Scanner:
-    return SaneScanner(device=cfg.device)
+    return scanners.create(cfg.backend, cfg.device)
 
 
 @app.command()
@@ -57,7 +57,7 @@ def session(
             except ScannerError as error:
                 typer.secho(f"Scan failed: {error}", fg="red", err=True)
                 continue
-            result = s.add_scan(image, dpi)
+            result = s.add_scan(image, dpi, scanner=scanner.name)
             typer.echo(f"{result.scan.name}: {len(result.extracts)} Extract(s)")
             if preview and _rejected_after_preview(image, dpi, s):
                 s.discard(result.scan)
@@ -116,9 +116,9 @@ def prune(yes: Annotated[bool, typer.Option("--yes", help="Don't ask")] = False)
 
 @app.command()
 def devices() -> None:
-    """List the scanners SANE can see."""
+    """List the scanners the configured backend can see."""
     cfg = config.load()
-    found = SaneScanner(device=cfg.device).devices()
+    found = make_scanner(cfg).devices()
     typer.echo("\n".join(found) if found else "No scanner found. Is it plugged in and on?")
 
 

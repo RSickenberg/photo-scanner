@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -6,6 +8,8 @@ from tests.synthetic import FakePrint, make_scan
 
 
 class FakeScanner:
+    name = "fake:scanner"
+
     def __init__(self):
         self.calls = 0
 
@@ -39,6 +43,9 @@ def test_a_session_scans_until_q_and_backs_everything_up(setup):
         "grandma_s001_p01.tif", "grandma_s001_p02.tif",
         "grandma_s002_p01.tif", "grandma_s002_p02.tif",
     ]  # fmt: skip
+    record = json.loads(next(nas.glob("*/session.json")).read_text())
+    assert record["totals"] == {"scans": 2, "extracts": 4}
+    assert {s["scanner"] for s in record["scans"]} == {"fake:scanner"}
 
 
 def test_rejected_preview_discards_the_scan(setup, monkeypatch):
