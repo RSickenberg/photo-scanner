@@ -1,10 +1,18 @@
 # Changelog
 
-## [v2.0.3](https://github.com/RSickenberg/photo-scanner/compare/v2.0.2...v2.0.3)
+## [v2.1.0](https://github.com/RSickenberg/photo-scanner/compare/v2.0.3...v2.1.0)
+
+- feat(session): d dates the latest Scan, never over hand or Back dates [`7fad99a`](https://github.com/RSickenberg/photo-scanner/commit/7fad99a9c3466bbe3e9b61481806b8f5dea1de95)
+- refactor: simpler archive, backup and command line [`182b091`](https://github.com/RSickenberg/photo-scanner/commit/182b091056a81dd652bdd5880c429858cc0e6ad2)
+- fix: don't create a Source on a typo; reject config values of the wrong kind [`62bfa61`](https://github.com/RSickenberg/photo-scanner/commit/62bfa61d5bb69ba12ce63d6ea404e59e9a3c50c8)
+- refactor(detect): Region methods, one caption code path, shared helpers [`27a0043`](https://github.com/RSickenberg/photo-scanner/commit/27a0043ca442654bcfc5adf7422045663b7dc5a0)
+
+## [v2.0.3](https://github.com/RSickenberg/photo-scanner/compare/v2.0.2...v2.0.3) (2026-09-24)
 
 - fix(detect): split Prints joined across a partly bridged gap [`f5541a1`](https://github.com/RSickenberg/photo-scanner/commit/f5541a1df303e073d3d6192c55d437377eda6631)
 - fix(detect): a caption between two Prints belongs to the nearest one only [`87eb42c`](https://github.com/RSickenberg/photo-scanner/commit/87eb42c0cfc4a544654005e84c2f68e76fc020d4)
 - feat(backs): keep the whole Back Scan as JPEG [`460812f`](https://github.com/RSickenberg/photo-scanner/commit/460812fb1c9ca9454b576614dce4204e7dd533ee)
+- chore(release): 2.0.3 [`2500588`](https://github.com/RSickenberg/photo-scanner/commit/2500588fe42291d7e5d7b36f541a68f02ee417cc)
 
 ## [v2.0.2](https://github.com/RSickenberg/photo-scanner/compare/v2.0.1...v2.0.2) (2026-09-24)
 
