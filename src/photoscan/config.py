@@ -2,7 +2,7 @@
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from photoscan.archive import CutSettings
@@ -52,29 +52,54 @@ class Config:
     cut: CutSettings = CutSettings()
 
 
+class ConfigError(ValueError):
+    pass
+
+
+# Config file key -> (setting it fills, kind of value). The cut settings live
+# in CutSettings; `min_print_cm` is its `min_side_cm`.
+_KEYS = {
+    "output_dir": ("output_dir", Path),
+    "nas_dir": ("nas_dir", Path),
+    "dpi": ("dpi", int),
+    "back_dpi": ("back_dpi", int),
+    "calibration_max_age_minutes": ("calibration_max_age_minutes", int),
+    "backend": ("backend", str),
+    "device": ("device", str),
+    "min_print_cm": ("cut.min_side_cm", float),
+    "inset_px": ("cut.inset_px", int),
+    "jpeg_quality": ("cut.jpeg_quality", int),
+}
+
+
 def config_path() -> Path:
     return Path(os.environ.get("PHOTOSCAN_CONFIG", DEFAULT_PATH)).expanduser()
 
 
 def load(path: Path | None = None) -> Config:
+    """The settings from the config file; defaults for anything it doesn't set."""
     path = path or config_path()
-    if not path.exists():
-        return Config()
-    raw = tomllib.loads(path.read_text())
-    defaults = Config()
-    return Config(
-        output_dir=Path(raw.get("output_dir", defaults.output_dir)).expanduser(),
-        nas_dir=Path(raw["nas_dir"]).expanduser() if raw.get("nas_dir") else None,
-        dpi=int(raw.get("dpi", defaults.dpi)),
-        back_dpi=int(raw.get("back_dpi", defaults.back_dpi)),
-        calibration_max_age_minutes=int(
-            raw.get("calibration_max_age_minutes", defaults.calibration_max_age_minutes)
-        ),
-        backend=raw.get("backend", defaults.backend),
-        device=raw.get("device"),
-        cut=CutSettings(
-            min_side_cm=float(raw.get("min_print_cm", defaults.cut.min_side_cm)),
-            inset_px=int(raw.get("inset_px", defaults.cut.inset_px)),
-            jpeg_quality=int(raw.get("jpeg_quality", defaults.cut.jpeg_quality)),
-        ),
-    )
+    raw = tomllib.loads(path.read_text()) if path.exists() else {}
+    top, cut = {}, {}
+    for key, value in raw.items():
+        if key not in _KEYS or value in ("", None):
+            continue
+        name, kind = _KEYS[key]
+        target, name = (cut, name[4:]) if name.startswith("cut.") else (top, name)
+        target[name] = _convert(key, value, kind)
+    return replace(Config(**top), cut=CutSettings(**cut))
+
+
+def _convert(key: str, value, kind: type):
+    if kind is Path:
+        return Path(str(value)).expanduser()
+    if kind is int:
+        # 2 and 2.0 are fine; 1.5 or "600" are not silently turned into something else.
+        if isinstance(value, bool) or not isinstance(value, int | float) or value != int(value):
+            raise ConfigError(f"{key} must be a whole number, got {value!r}")
+        return int(value)
+    if kind is float:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ConfigError(f"{key} must be a number, got {value!r}")
+        return float(value)
+    return str(value)

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from photoscan.config import EXAMPLE, Config, load
+from photoscan.config import EXAMPLE, Config, ConfigError, load
 from photoscan.scanners import ScannerError, create, sane
 from photoscan.scanners.sane import SaneScanner, build_command, parse_devices, parse_options
 
@@ -162,3 +162,26 @@ def test_name_looks_the_scanner_up_before_any_scan():
 def test_name_is_none_when_no_scanner_is_connected():
     run, _ = _fake_scanimage(devices="")
     assert SaneScanner(run=run).name is None
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ("inset_px = 1.5", "inset_px must be a whole number"),
+        ('dpi = "600"', "dpi must be a whole number"),
+        ('min_print_cm = "big"', "min_print_cm must be a number"),
+    ],
+)
+def test_config_rejects_values_of_the_wrong_kind(tmp_path, line, message):
+    path = tmp_path / "config.toml"
+    path.write_text(line + "\n")
+
+    with pytest.raises(ConfigError, match=message):
+        load(path)
+
+
+def test_config_accepts_a_whole_number_written_as_float(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("inset_px = 2.0\nmin_print_cm = 3\n")
+    config = load(path)
+    assert (config.cut.inset_px, config.cut.min_side_cm) == (2, 3.0)

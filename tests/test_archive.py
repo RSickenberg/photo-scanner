@@ -433,3 +433,11 @@ def test_recut_still_reads_an_older_tiff_back_scan(archive, reader, tmp_path):
     assert {e["back"] for e in _record(album)["scans"][0]["extracts"]} == {
         "album_s001_p01_back", "album_s001_p02_back",
     }  # fmt: skip
+
+
+def test_finding_an_unknown_source_creates_nothing(archive, tmp_path):
+    archive.source("Album")
+
+    assert archive.find_source("Album").name == "Album"
+    assert archive.find_source("Typo") is None
+    assert not (tmp_path / "archive/typo").exists()

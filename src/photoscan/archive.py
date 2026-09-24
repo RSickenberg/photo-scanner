@@ -80,11 +80,15 @@ class Archive:
         records = sorted(self.archive.glob("[!_]*/source.json"))
         return [Source(self, json.loads(r.read_text())) for r in records]
 
+    def find_source(self, name: str) -> "Source | None":
+        """An existing Source by name; None if there's none (nothing is created)."""
+        path = self.archive / slugify(name) / "source.json"
+        return Source(self, json.loads(path.read_text())) if path.exists() else None
+
     def source(self, name: str, *, estimate: PhotoDate | None = None) -> "Source":
         """Open a Source, creating it (with its date estimate) if it's new."""
-        path = self.archive / slugify(name) / "source.json"
-        if path.exists():
-            return Source(self, json.loads(path.read_text()))
+        if found := self.find_source(name):
+            return found
         record = {"name": name, "estimate": str(estimate) if estimate else None, "scans": []}
         source = Source(self, record)
         source.save()

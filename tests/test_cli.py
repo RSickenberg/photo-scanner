@@ -185,3 +185,27 @@ def test_a_recent_calibration_is_reused_without_asking(setup):
     assert "Using the calibration from" in result.output
     assert "Calibration:" not in result.output
     assert scanner.calls == 2  # one Scan, no calibration pass
+
+
+@pytest.mark.parametrize("args", [["dates", "Typo"], ["date", "1985", "--source", "Typo"]])
+def test_an_unknown_source_is_refused_not_created(setup, args):
+    local, _, _, _ = setup
+    run("session", "Album", "--no-calibrate", input="\nq\n")
+
+    result = CliRunner().invoke(cli.app, args)
+
+    assert result.exit_code != 0
+    assert "No Source named 'Typo'" in result.output
+    assert "Album" in result.output  # the known ones are listed
+    assert not (local / "archive/typo").exists()
+
+
+def test_a_bad_config_value_is_reported_clearly(setup, tmp_path, monkeypatch):
+    cfg = tmp_path / "bad.toml"
+    cfg.write_text("inset_px = 1.5\n")
+    monkeypatch.setenv("PHOTOSCAN_CONFIG", str(cfg))
+
+    result = CliRunner().invoke(cli.app, ["dates"])
+
+    assert result.exit_code != 0
+    assert "inset_px must be a whole number" in result.output

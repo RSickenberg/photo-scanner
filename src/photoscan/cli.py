@@ -45,7 +45,7 @@ def session(
     ] = True,
 ) -> None:
     """Scan batch after batch of Prints, filing each Scan under a Source."""
-    cfg = config.load()
+    cfg = _config()
     dpi = dpi or cfg.dpi
     archive = make_archive(cfg)
     current = _pick_source(archive, source)
@@ -131,7 +131,7 @@ def recut(
     scans: Annotated[list[Path], typer.Argument(help="Scan TIFFs (archive/*/scans)")],
 ) -> None:
     """Redo the Extracts (and Backs) of existing Scans."""
-    archive = make_archive(config.load())
+    archive = make_archive(_config())
     for path in scans:
         source, name = archive.locate(path)
         result = source.recut(name)
@@ -148,7 +148,7 @@ def rotate(
     degrees: Annotated[int, typer.Option(help="Clockwise: 90, 180 or 270")] = 90,
 ) -> None:
     """Turn Extracts that came out sideways or upside down (master and photo together)."""
-    archive = make_archive(config.load())
+    archive = make_archive(_config())
     for extract in extracts:
         archive.rotate(extract, degrees)
         typer.echo(f"rotated {extract.stem} by {degrees}°")
@@ -167,9 +167,9 @@ def set_date(
         when = PhotoDate.parse(value)
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
-    archive = make_archive(config.load())
+    archive = make_archive(_config())
     if source:
-        archive.source(source).set_estimate(when)
+        _existing_source(archive, source).set_estimate(when)
         typer.echo(f"{source}: estimate {when or 'unknown'}")
     for path in extracts or []:
         found, name = archive.locate(path)
@@ -180,8 +180,8 @@ def set_date(
 @app.command()
 def dates(source: Annotated[str | None, typer.Argument(help="Only this Source")] = None) -> None:
     """List every Extract with its Photo date and where the date came from."""
-    archive = make_archive(config.load())
-    chosen = [archive.source(source)] if source else archive.sources()
+    archive = make_archive(_config())
+    chosen = [_existing_source(archive, source)] if source else archive.sources()
     for src in chosen:
         estimate = f" (estimate {src.estimate})" if src.estimate else ""
         typer.secho(f"{src.name}{estimate}", bold=True)
@@ -194,7 +194,7 @@ def dates(source: Annotated[str | None, typer.Argument(help="Only this Source")]
 @app.command()
 def sync() -> None:
     """Copy everything not yet on the NAS, verifying each file."""
-    cfg = _require_nas(config.load())
+    cfg = _require_nas(_config())
     report = backup.sync(cfg.output_dir, cfg.nas_dir)
     typer.echo(f"{len(report.copied)} file(s) copied, {len(report.failed)} failed")
     if report.failed:
@@ -214,7 +214,7 @@ def prune(
 ) -> None:
     """Delete local files whose NAS copy is verified identical."""
     if force:
-        cfg = config.load()
+        cfg = _config()
         if not yes:
             lost = backup.not_backed_up(cfg.output_dir)
             typer.secho(
@@ -225,7 +225,7 @@ def prune(
         deleted = backup.prune(cfg.output_dir, None, force=True)
         typer.echo(f"{len(deleted)} local file(s) deleted")
         return
-    cfg = _require_nas(config.load())
+    cfg = _require_nas(_config())
     if not yes:
         typer.confirm(f"Delete backed-up files from {cfg.output_dir}?", abort=True)
     deleted = backup.prune(cfg.output_dir, cfg.nas_dir)
@@ -235,7 +235,7 @@ def prune(
 @app.command()
 def devices() -> None:
     """List the scanners the configured backend can see."""
-    cfg = config.load()
+    cfg = _config()
     found = make_scanner(cfg).devices()
     typer.echo("\n".join(found) if found else "No scanner found. Is it plugged in and on?")
 
@@ -249,6 +249,23 @@ def show_config() -> None:
         path.write_text(config.EXAMPLE)
         typer.echo(f"Created {path}; set nas_dir in it.")
     typer.echo(f"{path}\n\n{path.read_text()}")
+
+
+def _config() -> config.Config:
+    try:
+        return config.load()
+    except config.ConfigError as error:
+        typer.secho(f"{config.config_path()}: {error}", fg="red", err=True)
+        raise typer.Exit(1) from error
+
+
+def _existing_source(archive: Archive, name: str) -> Source:
+    """A Source to look at or change: never created by a typo."""
+    if found := archive.find_source(name):
+        return found
+    known = ", ".join(repr(s.name) for s in archive.sources()) or "none yet"
+    typer.secho(f"No Source named {name!r}. Known: {known}", fg="red", err=True)
+    raise typer.Exit(1)
 
 
 def _calibrate(sitting: Session, scanner: Scanner, dpi: int, deep: bool) -> None:
