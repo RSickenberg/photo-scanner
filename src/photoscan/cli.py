@@ -97,10 +97,10 @@ def session(
                     default="",
                     show_default=False,
                 )
-                image = _scan(scanner, dpi, deep)
+                image = _scan(scanner, cfg.back_dpi, False)
                 if image is None:
                     continue
-                result = sitting.add_back(last[0], last[1], image, dpi)
+                result = sitting.add_back(last[0], last[1], image, cfg.back_dpi)
                 typer.echo(f"{len(result.matched)} Back(s) matched to their fronts")
                 for name in result.unmatched:
                     typer.secho(f"Unmatched Back kept as {name}", fg="yellow")

@@ -302,3 +302,21 @@ def test_16_bit_scans_give_16_bit_masters(archive, tmp_path):
     name = archive.start_session(DAY).add_scan(album, scan, DPI).extracts[0]
 
     assert tifffile.imread(tmp_path / f"archive/album/masters/{name}.tif").dtype == np.uint16
+
+
+def test_backs_can_be_scanned_at_a_lower_resolution_than_fronts(archive, reader, tmp_path):
+    # Real LiDE 400: 300 dpi takes ~20 s, 600 dpi ~42 s; 300 is plenty for printed dates.
+    import cv2
+
+    session, album = archive.start_session(DAY), archive.source("Album")
+    front = session.add_scan(album, make_scan(TWO_PRINTS), DPI)
+    moved = [FakePrint((620, 1180), (300, 450), angle=3), FakePrint((280, 320), (450, 300))]
+    half = cv2.resize(make_scan(moved, seed=9), None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+    reader.text = ["KODAK 12.08.79"]
+
+    back = session.add_back(album, front.scan, half, DPI // 2)
+
+    assert set(back.matched) == {"album_s001_p01", "album_s001_p02"}
+    assert _record(album)["scans"][0]["back_dpi"] == DPI // 2
+    with Image.open(tmp_path / "archive/album/backs/album_s001_p01_back.jpg") as img:
+        assert img.size[0] == pytest.approx(450 // 2, abs=6)

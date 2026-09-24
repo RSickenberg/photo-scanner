@@ -59,7 +59,7 @@ is filed under, e.g. `[Album Grand-mère · est. 1970s]`:
 | Key | Does |
 |---|---|
 | Enter | Scan the Prints on the glass |
-| `b` | Scan the **Backs**: flip every Print in place, then Enter. Each Back is paired with its front even if it moved a little; one that can't be paired is kept and reported |
+| `b` | Scan the **Backs** (at `back_dpi`, 300 by default: half the time of 600, enough for printed dates): flip every Print in place, then Enter. Each Back is paired with its front even if it moved a little; one that can't be paired is kept and reported |
 | `d` | Set the Photo date for the next Scans (`1985-06-15`, `1985-06`, `1985`, `1980s`, `~1985`; empty goes back to the Source's) |
 | `o` | Switch to another Source, or create one |
 | `c` | Recalibrate, e.g. after switching between lid and cloth or cleaning the glass |

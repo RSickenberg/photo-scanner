@@ -9,6 +9,7 @@ output_dir = "~/Pictures/photoscan"
 # nas_dir = "/Volumes/photos/family-scans"
 
 dpi = 600
+back_dpi = 300       # Backs are only read for printed dates: 300 dpi takes half the time
 min_print_cm = 2.5   # shorter side; anything smaller is treated as dust
 inset_px = 2         # cut this far inside each Print's edge
 jpeg_quality = 95

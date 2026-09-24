@@ -257,6 +257,7 @@ class Source:
         entry = self._scan(scan)
         entry["back_scan"] = f"{scan}_back"
         entry["back_calibration"] = calibration
+        entry["back_dpi"] = dpi  # may be lower than the front's: only text is needed
         write_tiff(self.scan_file(entry["back_scan"]), back, self._meta(entry, dpi=dpi))
         result = self._backs(entry, back, dpi)
         self.save()
@@ -349,7 +350,9 @@ class Source:
             old.unlink()
         calibration = self.archive.calibration(entry.get("back_calibration"))
         found = find_prints(back, dpi, min_side_cm=s.min_side_cm, calibration=calibration)
-        fronts = [_region(item["region"]) for item in entry["extracts"]]
+        # Fronts' regions are in the front Scan's pixels; bring them to the Back's.
+        scale = dpi / entry["dpi"]
+        fronts = [_region(item["region"], scale) for item in entry["extracts"]]
         pairs, unmatched = match_backs(fronts, found, dpi)
         self.back("x").parent.mkdir(parents=True, exist_ok=True)
         meta = self._meta(entry, dpi=dpi)
@@ -423,9 +426,9 @@ class Source:
         return max(numbers, default=0) + 1
 
 
-def _region(values: list[float]) -> Region:
+def _region(values: list[float], scale: float = 1.0) -> Region:
     cx, cy, w, h, angle = values
-    return Region(center=(cx, cy), size=(w, h), angle=angle)
+    return Region(center=(cx * scale, cy * scale), size=(w * scale, h * scale), angle=angle)
 
 
 def _now() -> str:

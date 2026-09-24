@@ -1,5 +1,6 @@
 import json
 
+import cv2
 import pytest
 from PIL import ExifTags, Image
 from typer.testing import CliRunner
@@ -21,9 +22,11 @@ class FakeScanner:
 
     def scan(self, dpi, *, deep=False):
         self.calls += 1
-        if self.calls == 1:
-            return make_scan([], glass_dust=[(1100, 150)])
-        return make_scan(TWO_PRINTS)
+        empty = self.calls == 1
+        image = make_scan([], glass_dust=[(1100, 150)]) if empty else make_scan(TWO_PRINTS)
+        # The synthetic Scans are drawn at 150 dpi; like a real scanner, other
+        # resolutions give bigger or smaller images of the same glass.
+        return cv2.resize(image, None, fx=dpi / 150, fy=dpi / 150, interpolation=cv2.INTER_AREA)
 
 
 class Reader:
@@ -38,7 +41,7 @@ def setup(tmp_path, monkeypatch):
     local, nas = tmp_path / "local", tmp_path / "nas"
     nas.mkdir()
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'output_dir = "{local}"\nnas_dir = "{nas}"\ndpi = 150\n')
+    cfg.write_text(f'output_dir = "{local}"\nnas_dir = "{nas}"\ndpi = 150\nback_dpi = 75\n')
     monkeypatch.setenv("PHOTOSCAN_CONFIG", str(cfg))
     scanner, reader = FakeScanner(), Reader()
     monkeypatch.setattr(cli, "make_scanner", lambda _: scanner)
