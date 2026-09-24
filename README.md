@@ -1,15 +1,19 @@
 # photo-scanner
 
 Back up old family photos quickly: put several Prints on a flatbed scanner
-(built and tested with a **Canon CanoScan LiDE 400**), press Enter, and `photoscan` scans the glass, finds each Print,
-straightens it and saves it as its own file. It then backs everything up to
-your NAS. macOS only.
+(built and tested with a **Canon CanoScan LiDE 400**) and press Enter.
+`photoscan` scans the glass, finds each Print, straightens it, saves it as
+its own file, dates it, and backs everything up to your NAS, laid out for
+**Ugreen Photos**. macOS only.
 
 Words used below (see [CONTEXT.md](CONTEXT.md)):
 - **Print**: a physical photo.
+- **Source**: where Prints come from: an album, a box, an envelope. The archive is organised by Source.
 - **Scan**: one pass of the scanner, with several Prints on it.
 - **Extract**: one Print cut out of a Scan.
-- **Session**: one sitting, under one **Label**.
+- **Back**: the reverse side of a Print, often with a printed date.
+- **Photo date**: when the picture was taken, as precisely as it's known.
+- **Session**: one sitting of scanning, possibly across several Sources.
 
 ## Install
 
@@ -19,6 +23,10 @@ uv tool install git+https://github.com/RSickenberg/photo-scanner
 photoscan config             # creates ~/.config/photoscan/config.toml from config.toml.example; set nas_dir there
 photoscan devices            # should list your scanner, e.g. pixma:04A91912_…
 ```
+
+In Ugreen Photos, add **only `<nas_dir>/photos`** as a photo folder. The
+`archive/` tree next to it holds masters, whole Scans and Backs, which would
+otherwise show up as duplicates in the timeline.
 
 ### Other scanners
 
@@ -31,108 +39,120 @@ config to choose one. Scanners SANE can't drive need a new backend in
 ## Use
 
 ```bash
-photoscan session "Grandma album 1970s"
+photoscan session "Album Grand-mère"
 ```
+
+A new Source asks for its rough date (`1970s`, `~1985`, or Enter for
+unknown). Without a name, `photoscan session` lists the existing Sources to
+pick from.
 
 Each Session starts with a **Calibration**: empty the glass, close the lid
 (or lay the black cloth), and press Enter. `photoscan` learns what the
-background looks like and where the dust is on the glass. Press `c` during
-the Session to recalibrate, for example after switching between lid and cloth
-or cleaning the glass. `s` or `--no-calibrate` skips it.
+background looks like and where the dust is on the glass. `s` or
+`--no-calibrate` skips it.
 
-Lay the Prints on the glass **with a gap of about 1 cm between them**, about
-5 mm from the glass edges, then
-**cover them with a black cloth or sheet** instead of closing the white lid.
-Detection is reliable on a dark background, but photos with white borders get
-lost on the white lid. Press Enter to scan. Repeat with the next batch, and
-press `q` to finish.
+Lay the Prints on the glass **with a gap of about 1 cm between them** and
+about 5 mm from the glass edges, then **cover them with a black cloth or
+sheet** instead of closing the white lid. The prompt shows what the next Scan
+is filed under, e.g. `[Album Grand-mère · est. 1970s]`:
+
+| Key | Does |
+|---|---|
+| Enter | Scan the Prints on the glass |
+| `b` | Scan the **Backs**: flip every Print in place, then Enter. Each Back is paired with its front even if it moved a little; one that can't be paired is kept and reported |
+| `d` | Set the Photo date for the next Scans (`1985-06-15`, `1985-06`, `1985`, `1980s`, `~1985`; empty goes back to the Source's) |
+| `o` | Switch to another Source, or create one |
+| `c` | Recalibrate, e.g. after switching between lid and cloth or cleaning the glass |
+| `q` | Finish |
+
+Add `--preview` to see each Scan with numbered boxes, and press `r` to throw
+away a bad cut and rescan. Add `--16bit` for special Prints. The default is
+600 dpi, 8 bits per channel.
 
 Known limitation: on the white lid, Prints with large near-white areas (sky,
 white borders) can be split into pieces or missed. That's what the black
 cloth avoids. Because the whole Scan is always kept, `recut` can redo the
 cuts later.
 
-Add `--preview` to see each Scan with numbered boxes, and press `r` to throw
-away a bad cut and rescan. Add `--16bit` for special Prints. The default is
-600 dpi, 8 bits per channel.
-
-Each Session produces:
+### Layout
 
 ```
-~/Pictures/photoscan/2026-09-24_grandma-album-1970s/
-  session.json
-  calibration/cal_01.tif                       empty glass, reference for the Session
-  scans/grandma-album-1970s_s001.tif          whole Scan, kept for re-cutting
-  extracts/grandma-album-1970s_s001_p01.tif   lossless archive copy
-  extracts/grandma-album-1970s_s001_p01.jpg   for sharing
+~/Pictures/photoscan/
+  photos/album-grand-mere/album-grand-mere_s001_p01.jpg          one JPEG per Print: Ugreen's folder
+  archive/album-grand-mere/source.json                            the Source's record
+  archive/album-grand-mere/scans/album-grand-mere_s001.tif         whole Scans (+ _back.tif)
+  archive/album-grand-mere/masters/album-grand-mere_s001_p01.tif   lossless Extracts
+  archive/album-grand-mere/backs/album-grand-mere_s001_p01_back.tif (+ .jpg)
+  archive/_sessions/2026-09-24_01.json                             each sitting
+  archive/_calibrations/2026-09-24_01_cal_01.tif                   empty-glass Scans
 ```
 
-The Label and the date are embedded in every file (XMP title/description,
-EXIF/TIFF date).
+Names never contain the Photo date, so fixing a date never renames a file or
+makes the NAS Backup copy it again.
 
-**Glass dust** found by the Calibration is repaired in the Extracts (TIFF and
-JPEG). A speck is only repaired where the Extract shows the same speck, at
-the same place and with the same shape. Lint on the lid shows up in the
-Calibration too, but it ends up behind the Print, so it's left alone there.
-The untouched Scan in `scans/` always keeps the original.
+### Photo dates
 
-`session.json` keeps a record of the Session: every Calibration (time,
-scanner, dpi, background colour, noise, detection cut-off, specks found) and,
-for every Scan, when it was scanned, by which scanner, at which dpi and bit
-depth, which Calibration it used, which Extracts came out of it, and how many
-dust specks were repaired in each. It also holds running totals. Discarding a Scan from the preview
-removes it from the record, and `recut` updates its Extracts and adds a
-`recut_at` time.
+Ugreen Photos places photos by EXIF `DateTimeOriginal`, so that's where the
+Photo date goes, not the scan date. It's chosen in this order:
 
-```json
-{
-  "label": "Grandma album 1970s",
-  "date": "2026-09-24",
-  "calibrations": [
-    {
-      "id": "cal_01",
-      "calibrated_at": "2026-09-24T19:00:42",
-      "scanner": "pixma:04A91912_4FA05A",
-      "dpi": 600,
-      "background_lab": [234.3, 128.1, 129.2],
-      "noise": 2.12,
-      "threshold": 8.0,
-      "dust_specks": 1940
-    }
-  ],
-  "scans": [
-    {
-      "scan": "grandma-album-1970s_s001",
-      "scanned_at": "2026-09-24T19:02:11",
-      "scanner": "pixma:04A91912_4FA05A",
-      "dpi": 600,
-      "bits": 8,
-      "calibration": "cal_01",
-      "extracts": ["grandma-album-1970s_s001_p01", "grandma-album-1970s_s001_p02"],
-      "dust_repaired": { "grandma-album-1970s_s001_p01": 2, "grandma-album-1970s_s001_p02": 0 }
-    }
-  ],
-  "totals": { "scans": 1, "extracts": 2 }
-}
+1. a date you typed (`d` in the loop, or `photoscan date` later);
+2. a date printed on the Back (lab stamps), read by Apple Vision on the Mac;
+3. a date printed on the front (camera imprints, printed cards);
+4. the Source's rough date;
+5. otherwise unknown: no date is invented, and Ugreen falls back to the
+   file's date.
+
+Approximate dates are written as the first day of their period (`1980s` is
+1980-01-01, `~1985` is 1985-01-01). Their real precision is kept in XMP and in
+`source.json`. Ugreen shows the Source name as the title and a description
+such as "Album Grand-mère - ca. 1975 (estimated for the Source)".
+
+```bash
+photoscan date 1983-07 photos/album-grand-mere/album-grand-mere_s004_p02.jpg
+photoscan date "~1975" --source "Album Grand-mère"   # new estimate; re-dates what used it
+photoscan dates "Album Grand-mère"                   # every Extract, its date, where it came from
 ```
+
+### Glass dust
+
+Dust found by the Calibration is repaired in the Extracts. A speck is only
+repaired where the Extract shows the same speck, at the same place and with
+the same shape. Lint on the lid shows up in the Calibration too, but it ends
+up behind the Print, so it's left alone there. The untouched Scan in
+`scans/` always keeps the original.
+
+### Records
+
+`source.json` records every Scan of the Source: when, in which Session, by
+which scanner, at which dpi and bit depth, with which Calibration, and each
+Extract's region, Photo date and where it came from, the text read on its
+front and Back, and the dust specks repaired. It also holds totals (scans,
+extracts, dated, undated). Each Session's record in `archive/_sessions/`
+lists its Calibrations (background colour, noise, detection cut-off, specks
+found) and the Scans it made. Records are never pruned.
+
+## Commands
 
 | Command | What it does |
 |---|---|
-| `photoscan session [LABEL]` | Calibrate, then scan batch after batch |
-| `photoscan recut scans/*.tif` | Redo the Extracts of existing Scans |
-| `photoscan rotate FILE… --degrees 90` | Turn Extracts clockwise (TIFF and JPEG together) |
+| `photoscan session [SOURCE]` | Calibrate, then scan batch after batch |
+| `photoscan date DATE FILE…` | Set the Photo date of Extracts (empty `""` clears a typed date) |
+| `photoscan date DATE --source NAME` | Set a Source's rough date |
+| `photoscan dates [SOURCE]` | List Extracts with their Photo date and where it came from |
+| `photoscan recut archive/*/scans/*.tif` | Redo the Extracts (and Backs) of existing Scans |
+| `photoscan rotate FILE… --degrees 90` | Turn Extracts clockwise (master and photo together) |
 | `photoscan sync` | Copy anything not yet on the NAS, verifying each file |
 | `photoscan prune` | Delete local files whose NAS copy is verified identical |
-| `photoscan prune --force` | Delete **all** local Scans and Extracts without checking the NAS. Warns how many were never backed up; `--yes` skips the question |
+| `photoscan prune --force` | Delete **all** local images without checking the NAS. Warns how many were never backed up; `--yes` skips the question |
 | `photoscan devices` / `config` | Scanner list / config file |
 
 ## NAS backup
 
 Files are always written locally first, then copied to `nas_dir` in the
-background after each Scan. Each copy is checked with SHA-256 before it
-counts as backed up. If the NAS isn't mounted, scanning carries on; run
-`photoscan sync` later. `prune` frees local space and only deletes files
-whose NAS copy matches.
+background after each Scan, keeping their file dates. Each copy is checked
+with SHA-256 before it counts as backed up. If the NAS isn't mounted,
+scanning carries on; run `photoscan sync` later. `prune` frees local space
+and only deletes files whose NAS copy matches.
 
 ## Development
 

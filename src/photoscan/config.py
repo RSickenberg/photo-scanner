@@ -5,7 +5,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from photoscan.session import CutSettings
+from photoscan.archive import CutSettings
 
 DEFAULT_PATH = Path("~/.config/photoscan/config.toml")
 

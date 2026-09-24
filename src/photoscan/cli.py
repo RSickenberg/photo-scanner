@@ -2,7 +2,6 @@
 
 import subprocess
 import tempfile
-from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -11,23 +10,32 @@ import numpy as np
 import typer
 
 from photoscan import backup, config, scanners
+from photoscan.archive import Archive, Session, Source
+from photoscan.dates import PhotoDate
 from photoscan.detect import find_prints
 from photoscan.scanners import Scanner, ScannerError
-from photoscan.session import Session, rotate_extract
 
 app = typer.Typer(
     no_args_is_help=True,
     help="Scan several family photos at once and cut each one into its own file.",
 )
 
+DATE_HELP = "1985-06-15, 1985-06, 1985, 1980s, ~1985 (approximate)"
+
 
 def make_scanner(cfg: config.Config) -> Scanner:
     return scanners.create(cfg.backend, cfg.device)
 
 
+def make_archive(cfg: config.Config) -> Archive:
+    return Archive(cfg.output_dir, settings=cfg.cut)
+
+
 @app.command()
 def session(
-    label: Annotated[str | None, typer.Argument(help='e.g. "Grandma album 1970s"')] = None,
+    source: Annotated[
+        str | None, typer.Argument(help='Source to start with, e.g. "Album Grand-mère"')
+    ] = None,
     dpi: Annotated[int | None, typer.Option(help="Overrides the config (default 600)")] = None,
     deep: Annotated[bool, typer.Option("--16bit", help="16 bits per channel")] = False,
     preview: Annotated[bool, typer.Option(help="Check the cuts after each Scan")] = False,
@@ -35,26 +43,35 @@ def session(
         bool, typer.Option(help="Scan the empty glass first (background + dust)")
     ] = True,
 ) -> None:
-    """Scan batch after batch of Prints, cutting each Scan into Extracts."""
+    """Scan batch after batch of Prints, filing each Scan under a Source."""
     cfg = config.load()
-    label = label or typer.prompt("Label for this Session")
     dpi = dpi or cfg.dpi
-    cfg.output_dir.mkdir(parents=True, exist_ok=True)
-    day = date.today()
-    known = backup.known_names(cfg.output_dir, Session.folder(cfg.output_dir, label, day))
-    s = Session.open(cfg.output_dir, label, day, settings=cfg.cut, known=known)
+    archive = make_archive(cfg)
+    current = _pick_source(archive, source)
+    sitting = archive.start_session()
     scanner = make_scanner(cfg)
     syncer = _start_backup(cfg)
-    typer.echo(f"Session: {s.path}")
-
+    typed: PhotoDate | None = None
+    last: tuple[Source, str] | None = None  # the Scan a Back pass applies to
     total = 0
+
+    def backup_now() -> None:
+        if syncer:
+            syncer.request()
+
     try:
         if calibrate:
-            _calibrate(s, scanner, dpi, deep)
+            _calibrate(sitting, scanner, dpi, deep)
         while True:
+            when = (
+                str(typed)
+                if typed
+                else (f"est. {current.estimate}" if current.estimate else "date unknown")
+            )
             answer = (
                 typer.prompt(
-                    "Place Prints, then Enter to scan (c to recalibrate, q to finish)",
+                    f"[{current.name} · {when}] Enter scan · b backs · d date · o source"
+                    " · c calibrate · q finish",
                     default="",
                     show_default=False,
                 )
@@ -64,48 +81,109 @@ def session(
             if answer == "q":
                 break
             if answer == "c":
-                _calibrate(s, scanner, dpi, deep)
-                continue
-            try:
-                image = scanner.scan(dpi, deep=deep)
-            except ScannerError as error:
-                typer.secho(f"Scan failed: {error}", fg="red", err=True)
-                continue
-            result = s.add_scan(image, dpi, scanner=scanner.name)
-            typer.echo(f"{result.scan.name}: {len(result.extracts)} Extract(s)")
-            if preview and _rejected_after_preview(image, dpi, s):
-                s.discard(result.scan)
-                typer.echo("Discarded; rearrange the Prints and scan again.")
-                continue
-            total += len(result.extracts)
-            if syncer:
-                syncer.request()
+                _calibrate(sitting, scanner, dpi, deep)
+            elif answer == "o":
+                current, typed, last = _pick_source(archive, None), None, None
+            elif answer == "d":
+                typed = _ask_date(
+                    "Photo date for the next Scans (empty = back to the Source's estimate)"
+                )
+            elif answer == "b":
+                if last is None:
+                    typer.echo("Scan the fronts first; b then scans their Backs.")
+                    continue
+                typer.prompt(
+                    "Flip every Print in place (same spot), then Enter",
+                    default="",
+                    show_default=False,
+                )
+                image = _scan(scanner, dpi, deep)
+                if image is None:
+                    continue
+                result = sitting.add_back(last[0], last[1], image, dpi)
+                typer.echo(f"{len(result.matched)} Back(s) matched to their fronts")
+                for name in result.unmatched:
+                    typer.secho(f"Unmatched Back kept as {name}", fg="yellow")
+                backup_now()
+            elif answer == "":
+                image = _scan(scanner, dpi, deep)
+                if image is None:
+                    continue
+                result = sitting.add_scan(current, image, dpi, scanner=scanner.name, typed=typed)
+                typer.echo(f"{result.scan}: {len(result.extracts)} Extract(s)")
+                if preview and _rejected_after_preview(image, dpi, sitting, cfg):
+                    current.discard(result.scan)
+                    typer.echo("Discarded; rearrange the Prints and scan again.")
+                    continue
+                last = (current, result.scan)
+                total += len(result.extracts)
+                backup_now()
     finally:
         if syncer:
             typer.echo("Finishing the Backup to the NAS…")
             syncer.close()
-    typer.echo(f"Done: {total} Extract(s) in {s.path}")
+    typer.echo(f"Done: {total} Extract(s). Photos in {archive.photos}")
 
 
 @app.command()
-def recut(scans: Annotated[list[Path], typer.Argument(help="Scan TIFFs (scans/*.tif)")]) -> None:
-    """Redo the Extracts of existing Scans."""
-    cfg = config.load()
-    for scan in scans:
-        extracts = Session.load(scan.resolve().parents[1], settings=cfg.cut).recut(scan)
-        typer.echo(f"{scan.name}: {len(extracts)} Extract(s)")
+def recut(
+    scans: Annotated[list[Path], typer.Argument(help="Scan TIFFs (archive/*/scans)")],
+) -> None:
+    """Redo the Extracts (and Backs) of existing Scans."""
+    archive = make_archive(config.load())
+    for path in scans:
+        source, name = archive.locate(path)
+        result = source.recut(name)
+        typer.echo(f"{name}: {len(result.extracts)} Extract(s)")
 
 
 @app.command()
 def rotate(
-    extracts: Annotated[list[Path], typer.Argument(help="Extract files (.tif or .jpg)")],
+    extracts: Annotated[list[Path], typer.Argument(help="Photos (.jpg) or masters (.tif)")],
     degrees: Annotated[int, typer.Option(help="Clockwise: 90, 180 or 270")] = 90,
 ) -> None:
-    """Turn Extracts that came out sideways or upside down (TIFF and JPEG together)."""
-    cfg = config.load()
+    """Turn Extracts that came out sideways or upside down (master and photo together)."""
+    archive = make_archive(config.load())
     for extract in extracts:
-        rotate_extract(extract, degrees, jpeg_quality=cfg.cut.jpeg_quality)
+        archive.rotate(extract, degrees)
         typer.echo(f"rotated {extract.stem} by {degrees}°")
+
+
+@app.command(name="date")
+def set_date(
+    value: Annotated[str, typer.Argument(help=f"{DATE_HELP}; empty to clear")],
+    extracts: Annotated[
+        list[Path] | None, typer.Argument(help="Photos (.jpg) or masters (.tif)")
+    ] = None,
+    source: Annotated[str | None, typer.Option(help="Set this Source's estimate instead")] = None,
+) -> None:
+    """Set the Photo date of Extracts, or a Source's estimate, and re-stamp the files."""
+    try:
+        when = PhotoDate.parse(value)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    archive = make_archive(config.load())
+    if source:
+        archive.source(source).set_estimate(when)
+        typer.echo(f"{source}: estimate {when or 'unknown'}")
+    for path in extracts or []:
+        found, name = archive.locate(path)
+        found.set_date(name, when)
+        typer.echo(f"{name}: {when or 'typed date cleared'}")
+
+
+@app.command()
+def dates(source: Annotated[str | None, typer.Argument(help="Only this Source")] = None) -> None:
+    """List every Extract with its Photo date and where the date came from."""
+    archive = make_archive(config.load())
+    chosen = [archive.source(source)] if source else archive.sources()
+    for src in chosen:
+        estimate = f" (estimate {src.estimate})" if src.estimate else ""
+        typer.secho(f"{src.name}{estimate}", bold=True)
+        for scan in src.scans:
+            for item in scan["extracts"]:
+                where = item["date_source"] or "-"
+                typer.echo(f"  {item['name']:<32} {item['date'] or 'unknown':<14} {where}")
 
 
 @app.command()
@@ -168,7 +246,7 @@ def show_config() -> None:
     typer.echo(f"{path}\n\n{path.read_text()}")
 
 
-def _calibrate(s: Session, scanner: Scanner, dpi: int, deep: bool) -> None:
+def _calibrate(sitting: Session, scanner: Scanner, dpi: int, deep: bool) -> None:
     """Scan the empty glass; retried until it works or is skipped."""
     while True:
         answer = typer.prompt(
@@ -180,15 +258,45 @@ def _calibrate(s: Session, scanner: Scanner, dpi: int, deep: bool) -> None:
         if answer.strip().lower() == "s":
             typer.echo("Not calibrated: the background is estimated from each Scan's border.")
             return
-        try:
-            cal = s.calibrate(scanner.scan(dpi, deep=deep), dpi, scanner=scanner.name)
-        except ScannerError as error:
-            typer.secho(f"Calibration scan failed: {error}", fg="red", err=True)
+        image = _scan(scanner, dpi, deep)
+        if image is None:
             continue
-        typer.echo(f"Calibrated: noise {cal.noise:.1f}, {cal.dust_specks} dust speck(s) on glass")
-        if cal.dust_specks > 50:
-            typer.secho("That's a lot of dust: clean the glass, then press c.", fg="yellow")
+        cal = sitting.calibrate(image, dpi, scanner=scanner.name)
+        typer.echo(f"Calibrated: noise {cal.noise:.1f}, {cal.dust_specks} speck(s) seen")
         return
+
+
+def _scan(scanner: Scanner, dpi: int, deep: bool) -> np.ndarray | None:
+    try:
+        return scanner.scan(dpi, deep=deep)
+    except ScannerError as error:
+        typer.secho(f"Scan failed: {error}", fg="red", err=True)
+        return None
+
+
+def _pick_source(archive: Archive, name: str | None) -> Source:
+    """An existing Source by number or name, or a new one (asking its rough date)."""
+    existing = archive.sources()
+    if name is None:
+        for i, src in enumerate(existing, start=1):
+            estimate = f" · est. {src.estimate}" if src.estimate else ""
+            typer.echo(f"  {i}. {src.name}{estimate}")
+        name = typer.prompt("Source (number, or a new name)").strip()
+        if name.isdigit() and 1 <= int(name) <= len(existing):
+            return existing[int(name) - 1]
+    for src in existing:
+        if src.name == name:
+            return src
+    estimate = _ask_date(f"Rough date for {name!r} ({DATE_HELP}; empty = unknown)")
+    return archive.source(name, estimate=estimate)
+
+
+def _ask_date(question: str) -> PhotoDate | None:
+    while True:
+        try:
+            return PhotoDate.parse(typer.prompt(question, default="", show_default=False))
+        except ValueError as error:
+            typer.secho(str(error), fg="red")
 
 
 def _start_backup(cfg: config.Config) -> backup.BackgroundSync | None:
@@ -218,12 +326,16 @@ def _require_nas(cfg: config.Config) -> config.Config:
     return cfg
 
 
-def _rejected_after_preview(image: np.ndarray, dpi: int, s: Session) -> bool:
+def _rejected_after_preview(
+    image: np.ndarray, dpi: int, sitting: Session, cfg: config.Config
+) -> bool:
     """Open the Scan with numbered boxes in Preview.app; ask whether to keep it."""
     small = (image >> 8).astype(np.uint8) if image.dtype == np.uint16 else image
     scale = 1200 / max(small.shape[:2])
     small = np.ascontiguousarray(cv2.resize(small, None, fx=scale, fy=scale))
-    regions = find_prints(image, dpi, min_side_cm=s.settings.min_side_cm, calibration=s.calibration)
+    regions = find_prints(
+        image, dpi, min_side_cm=cfg.cut.min_side_cm, calibration=sitting.calibration
+    )
     for i, r in enumerate(regions, start=1):
         rect = ((r.center[0] * scale, r.center[1] * scale),
                 (r.size[0] * scale, r.size[1] * scale), r.angle)  # fmt: skip

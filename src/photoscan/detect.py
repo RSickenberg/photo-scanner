@@ -137,6 +137,32 @@ def repair_dust(
     return np.dstack(channels), specks
 
 
+def match_backs(
+    fronts: list[Region], backs: list[Region], dpi: int, *, tolerance_cm: float = 3.0
+) -> tuple[dict[int, int], list[int]]:
+    """Pair each Back with the front it belongs to: {front index: back index}.
+
+    Prints are flipped in place, so a Back lies roughly where its front was,
+    same size (sides maybe swapped). Tolerates moving up to `tolerance_cm` and
+    any turn. Sizes must agree within 10%, which also tells swapped Prints of
+    different sizes apart. Returns the pairs and the Backs left unmatched.
+    """
+    tolerance_px = tolerance_cm / 2.54 * dpi
+    candidates = []
+    for f, front in enumerate(fronts):
+        for b, back in enumerate(backs):
+            distance = float(np.hypot(*np.subtract(front.center, back.center)))
+            sizes = np.divide(sorted(back.size), sorted(front.size))
+            if distance <= tolerance_px and np.all(np.abs(sizes - 1) <= 0.10):
+                candidates.append((distance, f, b))
+    pairs: dict[int, int] = {}
+    for _, f, b in sorted(candidates):  # closest pairs first
+        if f not in pairs and b not in pairs.values():
+            pairs[f] = b
+    unmatched = [b for b in range(len(backs)) if b not in pairs.values()]
+    return pairs, unmatched
+
+
 def _upright(image: np.ndarray, region: Region, inset_px: int, interpolation: int) -> np.ndarray:
     (cx, cy), (w, h) = region.center, region.size
     rotation = cv2.getRotationMatrix2D((cx, cy), region.angle, 1.0)

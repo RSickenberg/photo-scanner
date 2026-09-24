@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=2.5.3",
     "opencv-python-headless>=5.0.0.93",
     "pillow>=12.3.0",
+    "pyobjc-framework-vision>=10.3; sys_platform == 'darwin'",
     "tifffile>=2026.9.20",
     "typer>=0.27.2",
 ]

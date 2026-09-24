@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from photoscan.detect import calibrate, cut, find_prints, repair_dust
+from photoscan.detect import calibrate, cut, find_prints, match_backs, repair_dust
 from tests.synthetic import DARK, WHITE, FakePrint, make_scan
 
 DPI = 150
@@ -186,3 +186,46 @@ def test_dense_lint_is_all_found_and_does_not_inflate_the_threshold():
     calibration = calibrate(make_scan([], background=WHITE, glass_dust=lint), DPI)
     assert calibration.threshold == 8
     assert calibration.dust_specks == len(lint)
+
+
+def _region(cx, cy, w, h, angle=0.0):
+    from photoscan.detect import Region
+
+    return Region(center=(cx, cy), size=(w, h), angle=angle)
+
+
+def test_backs_match_their_fronts_despite_moving_and_turning_a_little():
+    fronts = [
+        _region(300, 300, 450, 300),
+        _region(900, 300, 450, 300),
+        _region(600, 1200, 300, 450),
+    ]
+    # Flipped in place: each moved up to ~1.5 cm (at 150 dpi, 1 cm = 59 px) and
+    # turned a few degrees; one was flipped the other way round (sides swapped).
+    backs = [
+        _region(640, 1170, 450, 300, 4),
+        _region(260, 330, 450, 300, -3),
+        _region(930, 280, 300, 450),
+    ]
+
+    pairs, unmatched = match_backs(fronts, backs, DPI)
+
+    assert pairs == {0: 1, 1: 2, 2: 0}
+    assert unmatched == []
+
+
+def test_a_back_too_far_from_any_front_is_unmatched_not_guessed():
+    fronts = [_region(300, 300, 450, 300)]
+    backs = [_region(300, 1200, 450, 300)]  # moved ~15 cm
+
+    assert match_backs(fronts, backs, DPI) == ({}, [0])
+
+
+def test_swapped_prints_of_different_sizes_are_told_apart_by_size():
+    fronts = [_region(300, 300, 450, 300), _region(700, 300, 300, 200)]
+    backs = [_region(700, 300, 450, 300), _region(300, 300, 300, 200)]  # swapped places
+
+    pairs, unmatched = match_backs(fronts, backs, DPI, tolerance_cm=8)
+
+    assert pairs == {0: 0, 1: 1}
+    assert unmatched == []

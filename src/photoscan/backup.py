@@ -15,8 +15,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 MANIFEST = ".backup.json"
-# Kept locally even when backed up: tiny, and needed to reopen a Session.
-_NEVER_PRUNED = {"session.json"}
+# Records (source.json, sessions) stay local even when backed up: tiny, and
+# they keep numbering and history going after the images are pruned.
+_KEEP_SUFFIX = ".json"
 
 
 class NasUnavailable(Exception):
@@ -55,7 +56,7 @@ def prune(local: Path, nas: Path | None, *, force: bool = False) -> list[Path]:
     not (see `not_backed_up` to warn first). `session.json` is always kept.
     """
     if force:
-        doomed = [p for p in _local_files(local) if p.name not in _NEVER_PRUNED]
+        doomed = [p for p in _local_files(local) if p.suffix != _KEEP_SUFFIX]
         for path in doomed:
             path.unlink()
         return doomed
@@ -64,7 +65,7 @@ def prune(local: Path, nas: Path | None, *, force: bool = False) -> list[Path]:
     deleted = []
     for path in _local_files(local):
         rel = path.relative_to(local).as_posix()
-        if path.name in _NEVER_PRUNED or rel not in manifest:
+        if path.suffix == _KEEP_SUFFIX or rel not in manifest:
             continue
         remote = nas / rel
         if _sha256(path) == manifest[rel] and remote.exists() and _sha256(remote) == manifest[rel]:
@@ -79,15 +80,8 @@ def not_backed_up(local: Path) -> list[Path]:
     return [
         p
         for p in _local_files(local)
-        if p.name not in _NEVER_PRUNED
-        and manifest.get(p.relative_to(local).as_posix()) != _sha256(p)
+        if p.suffix != _KEEP_SUFFIX and manifest.get(p.relative_to(local).as_posix()) != _sha256(p)
     ]
-
-
-def known_names(local: Path, session_path: Path) -> list[str]:
-    """File names of a Session recorded as backed up, including locally pruned ones."""
-    prefix = session_path.relative_to(local).as_posix() + "/"
-    return [Path(rel).name for rel in _load(local) if rel.startswith(prefix)]
 
 
 class BackgroundSync:
@@ -132,7 +126,9 @@ def _copy_verified(source: Path, dest: Path, digest: str) -> bool:
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_name(dest.name + ".partial")
     try:
-        shutil.copyfile(source, partial)
+        # copy2 keeps the file's modification time: Ugreen Photos places
+        # undated photos by it (ADR 0002), so a copy mustn't reset it.
+        shutil.copy2(source, partial)
         if _sha256(partial) != digest:
             partial.unlink()
             return False

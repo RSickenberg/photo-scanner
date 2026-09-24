@@ -1,6 +1,8 @@
+import os
+
 import pytest
 
-from photoscan.backup import NasUnavailable, known_names, not_backed_up, prune, sync
+from photoscan.backup import NasUnavailable, not_backed_up, prune, sync
 
 
 @pytest.fixture
@@ -66,11 +68,15 @@ def test_prune_deletes_only_files_verified_on_the_nas(local, nas):
     assert (session / "session.json").exists()
 
 
-def test_known_names_remember_pruned_files(local, nas):
-    sync(local, nas)
-    prune(local, nas)
+def test_sync_keeps_file_modification_times(local, nas):
+    # Ugreen Photos places undated photos by their file date (ADR 0002).
+    photo = local / "2026-09-24_grandma/extracts/grandma_s001_p01.jpg"
+    os.utime(photo, (978307200, 978307200))
 
-    assert "grandma_s001.tif" in known_names(local, local / "2026-09-24_grandma")
+    sync(local, nas)
+
+    copy = nas / "2026-09-24_grandma/extracts/grandma_s001_p01.jpg"
+    assert copy.stat().st_mtime == 978307200
 
 
 def test_forced_prune_deletes_everything_local_without_the_nas(local, tmp_path):
