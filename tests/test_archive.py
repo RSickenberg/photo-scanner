@@ -256,7 +256,7 @@ def test_back_pass_pairs_backs_with_fronts_and_reads_their_date(archive, reader,
     }
     assert back.unmatched == []
     assert (tmp_path / "archive/album/backs/album_s001_p01_back.jpg").exists()
-    assert (tmp_path / "archive/album/scans/album_s001_back.tif").exists()
+    assert (tmp_path / "archive/album/scans/album_s001_back.jpg").exists()
     assert not list((tmp_path / "photos").rglob("*_back*"))  # never in Ugreen's tree
     entry = _record(album)["scans"][0]["extracts"][0]
     assert (entry["date"], entry["date_source"], entry["back"]) == (
@@ -402,3 +402,34 @@ def test_backs_are_saved_as_jpeg_only(archive, tmp_path):
 
     assert not list((tmp_path / "archive/album/backs").glob("*.tif"))
     assert len(list((tmp_path / "archive/album/backs").glob("*.jpg"))) == 2
+
+
+def test_the_whole_back_scan_is_kept_as_jpeg_and_recut_reads_it(archive, reader, tmp_path):
+    session, album = archive.start_session(DAY), archive.source("Album")
+    front = session.add_scan(album, make_scan(TWO_PRINTS), DPI)
+    session.add_back(album, front.scan, make_scan(TWO_PRINTS, seed=9), DPI)
+    scans = tmp_path / "archive/album/scans"
+    assert sorted(p.name for p in scans.iterdir()) == ["album_s001.tif", "album_s001_back.jpg"]
+
+    reader.text = ["KODAK 12.08.79"]
+    album.recut(front.scan)
+
+    items = _record(album)["scans"][0]["extracts"]
+    assert {e["date"] for e in items} == {"1979-08-12"}  # Backs re-read from the JPEG
+
+
+def test_recut_still_reads_an_older_tiff_back_scan(archive, reader, tmp_path):
+    session, album = archive.start_session(DAY), archive.source("Album")
+    front = session.add_scan(album, make_scan(TWO_PRINTS), DPI)
+    session.add_back(album, front.scan, make_scan(TWO_PRINTS, seed=9), DPI)
+    scans = tmp_path / "archive/album/scans"
+    (scans / "album_s001_back.jpg").unlink()
+    old_back = make_scan(TWO_PRINTS, seed=9)
+    tifffile.imwrite(scans / "album_s001_back.tif", old_back, photometric="rgb")
+
+    reader.text = ["KODAK 12.08.79"]
+    album.recut(front.scan)
+
+    assert {e["back"] for e in _record(album)["scans"][0]["extracts"]} == {
+        "album_s001_p01_back", "album_s001_p02_back",
+    }  # fmt: skip

@@ -110,6 +110,11 @@ def read_tiff(path: Path) -> tuple[np.ndarray, Meta]:
     return image, _meta_from(xmp, stamp, round(num / den))
 
 
+def read_jpeg(path: Path) -> np.ndarray:
+    with Image.open(path) as img:
+        return np.asarray(img.convert("RGB"))
+
+
 def read_meta(path: Path) -> Meta:
     if path.suffix.lower() in (".tif", ".tiff"):
         return read_tiff(path)[1]

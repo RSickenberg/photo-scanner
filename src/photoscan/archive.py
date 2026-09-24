@@ -2,7 +2,7 @@
 
     <root>/photos/<source>/<source>_s001_p01.jpg     fronts only: point Ugreen Photos here
     <root>/archive/<source>/source.json               the Source's record (never pruned)
-    <root>/archive/<source>/scans/<source>_s001.tif   whole Scans (+ _back.tif)
+    <root>/archive/<source>/scans/<source>_s001.tif   whole Scans (+ _back.jpg)
     <root>/archive/<source>/masters/<source>_s001_p01.tif   lossless Extracts
     <root>/archive/<source>/backs/<source>_s001_p01_back.jpg
     <root>/archive/_sessions/<date>_01.json           each sitting: calibrations, Scans made
@@ -34,7 +34,7 @@ from photoscan.detect import (
     match_backs,
     repair_dust,
 )
-from photoscan.imagefiles import Meta, read_tiff, write_jpeg, write_tiff
+from photoscan.imagefiles import Meta, read_jpeg, read_tiff, write_jpeg, write_tiff
 
 Reader = Callable[[np.ndarray], list[str]]
 # How far a Print may move when flipped for its Back to still be paired.
@@ -248,6 +248,13 @@ class Source:
     def scan_file(self, scan: str) -> Path:
         return self.path / "scans" / f"{scan}.tif"
 
+    def back_scan_file(self, scan: str) -> Path:
+        """The whole Back Scan: a JPEG, being kept only for what's printed on it.
+        (Before 2.0.3 it was a TIFF, which is still read.)"""
+        jpeg = self.path / "scans" / f"{scan}_back.jpg"
+        tiff = self.path / "scans" / f"{scan}_back.tif"
+        return tiff if tiff.exists() and not jpeg.exists() else jpeg
+
     def master(self, extract: str) -> Path:
         return self.path / "masters" / f"{extract}.tif"
 
@@ -298,7 +305,8 @@ class Source:
         entry["back_scan"] = f"{scan}_back"
         entry["back_calibration"] = calibration
         entry["back_dpi"] = dpi  # may be lower than the front's: only text is needed
-        write_tiff(self.scan_file(entry["back_scan"]), back, self._meta(entry, dpi=dpi))
+        quality = self.archive.settings.jpeg_quality
+        write_jpeg(self.back_scan_file(scan), back, self._meta(entry, dpi=dpi), quality=quality)
         result = self._backs(entry, back, dpi)
         self.save()
         return result
@@ -310,8 +318,9 @@ class Source:
         image, _ = read_tiff(self.scan_file(scan))
         entry["extracts"] = self._cut(image, entry)
         if entry.get("back_scan"):
-            back, meta = read_tiff(self.scan_file(entry["back_scan"]))
-            self._backs(entry, back, meta.dpi)
+            path = self.back_scan_file(scan)
+            back = read_tiff(path)[0] if path.suffix == ".tif" else read_jpeg(path)
+            self._backs(entry, back, entry.get("back_dpi") or entry["dpi"])
         entry["recut_at"] = _now()
         self.save()
         return ScanResult(scan, [e["name"] for e in entry["extracts"]])
@@ -457,7 +466,7 @@ class Source:
             *(self.path / "backs").glob(f"{scan}_*"),
         ]
         if not keep_scans:
-            doomed += [self.scan_file(scan), self.scan_file(f"{scan}_back")]
+            doomed += [self.scan_file(scan), *(self.path / "scans").glob(f"{scan}_back.*")]
         for path in doomed:
             path.unlink(missing_ok=True)
 

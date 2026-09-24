@@ -86,7 +86,7 @@ can redo the cuts later.
 ~/Pictures/photoscan/
   photos/album-grand-mere/album-grand-mere_s001_p01.jpg          one JPEG per Print: Ugreen's folder
   archive/album-grand-mere/source.json                            the Source's record
-  archive/album-grand-mere/scans/album-grand-mere_s001.tif         whole Scans (+ _back.tif)
+  archive/album-grand-mere/scans/album-grand-mere_s001.tif         whole Scans (+ _back.jpg)
   archive/album-grand-mere/masters/album-grand-mere_s001_p01.tif   lossless Extracts
   archive/album-grand-mere/backs/album-grand-mere_s001_p01_back.jpg
   archive/_sessions/2026-09-24_01.json                             each sitting
