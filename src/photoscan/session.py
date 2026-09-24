@@ -1,7 +1,8 @@
 """A Session on disk: one folder of Scans and their Extracts, under one Label.
 
 <root>/<YYYY-MM-DD>_<label-slug>/
-    session.json      label, date, and a record of every Scan and its Extracts
+    session.json      label, date, and a record of every calibration, Scan and Extract
+    calibration/cal_01.tif        Scan of the empty glass (background + dust reference)
     scans/<slug>_s001.tif
     extracts/<slug>_s001_p01.tif  (+ .jpg)
 """
@@ -16,7 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
-from photoscan.detect import cut, find_prints
+from photoscan import detect
+from photoscan.detect import Calibration, cut, find_prints, repair_dust
 from photoscan.imagefiles import Meta, read_tiff, write_jpeg, write_tiff
 
 _SCAN_NUMBER = re.compile(r"_s(\d{3,})(?:_p\d+)?\.\w+$")
@@ -55,6 +57,8 @@ class Session:
         self._slug = path.name.split("_", 1)[1]
         self._next_number = next_number
         self._record = record
+        self._calibration: str | None = None  # id of the calibration new Scans use
+        self._loaded: dict[str, Calibration] = {}
 
     @classmethod
     def open(
@@ -77,6 +81,7 @@ class Session:
         record_path = path / "session.json"
         record = json.loads(record_path.read_text()) if record_path.exists() else {}
         record |= {"label": label, "date": day.isoformat()}
+        record.setdefault("calibrations", [])
         record.setdefault("scans", [])
         names = (
             [p.name for p in path.glob("*/*")]
@@ -103,6 +108,35 @@ class Session:
             known=known, settings=settings,
         )  # fmt: skip
 
+    @property
+    def calibration(self) -> Calibration | None:
+        """The calibration new Scans use, if any."""
+        return self._calibration_by_id(self._calibration)
+
+    def calibrate(self, empty: np.ndarray, dpi: int, *, scanner: str | None = None) -> Calibration:
+        """Learn the empty glass (background, dust) from a Scan of it; later Scans use it."""
+        number = len(self._record["calibrations"]) + 1
+        cal_id = f"cal_{number:02d}"
+        (self.path / "calibration").mkdir(exist_ok=True)
+        write_tiff(self._calibration_path(cal_id), empty, Meta(self.label, datetime.now(), dpi))
+        calibration = detect.calibrate(empty, dpi)
+        self._record["calibrations"].append(
+            {
+                "id": cal_id,
+                "calibrated_at": _now(),
+                "scanner": scanner,
+                "dpi": dpi,
+                "background_lab": [round(c, 1) for c in calibration.colour],
+                "noise": round(calibration.noise, 2),
+                "threshold": round(calibration.threshold, 2),
+                "dust_specks": calibration.dust_specks,
+            }
+        )
+        self._save_record()
+        self._loaded[cal_id] = calibration
+        self._calibration = cal_id
+        return calibration
+
     def add_scan(self, scan: np.ndarray, dpi: int, *, scanner: str | None = None) -> ScanResult:
         """Keep the whole Scan, then cut it into Extracts (TIFF + JPEG each).
 
@@ -113,7 +147,7 @@ class Session:
         # The Session's date is the date of record; the clock only adds the time of day.
         meta = Meta(self.label, datetime.combine(self.day, datetime.now().time()), dpi)
         write_tiff(scan_path, scan, meta)
-        extracts = self._extract(scan, scan_path, meta)
+        extracts, dust = self._extract(scan, scan_path, meta, self._calibration)
         self._record["scans"].append(
             {
                 "scan": scan_path.stem,
@@ -121,7 +155,9 @@ class Session:
                 "scanner": scanner,
                 "dpi": dpi,
                 "bits": 16 if scan.dtype == np.uint16 else 8,
+                "calibration": self._calibration,
                 "extracts": [e.stem for e in extracts],
+                "dust_repaired": dust,
             }
         )
         self._save_record()
@@ -140,13 +176,19 @@ class Session:
     def recut(self, scan_path: Path) -> list[Path]:
         """Redo the Extracts of an existing Scan, e.g. after tuning detection."""
         scan, meta = read_tiff(scan_path)
+        entry = next((e for e in self._record["scans"] if e["scan"] == scan_path.stem), None)
+        cal_id = entry.get("calibration") if entry else None
         for old in (self.path / "extracts").glob(f"{scan_path.stem}_p*"):
             old.unlink()
-        extracts = self._extract(scan, scan_path, Meta(self.label, meta.created, meta.dpi))
-        for entry in self._record["scans"]:
-            if entry["scan"] == scan_path.stem:
-                entry["extracts"] = [e.stem for e in extracts]
-                entry["recut_at"] = _now()
+        extracts, dust = self._extract(
+            scan, scan_path, Meta(self.label, meta.created, meta.dpi), cal_id
+        )
+        if entry:
+            entry |= {
+                "extracts": [e.stem for e in extracts],
+                "dust_repaired": dust,
+                "recut_at": _now(),
+            }
         self._save_record()
         return extracts
 
@@ -160,17 +202,35 @@ class Session:
             json.dumps(self._record, ensure_ascii=False, indent=2)
         )
 
-    def _extract(self, scan: np.ndarray, scan_path: Path, meta: Meta) -> list[Path]:
+    def _extract(
+        self, scan: np.ndarray, scan_path: Path, meta: Meta, cal_id: str | None
+    ) -> tuple[list[Path], dict[str, int]]:
+        """Cut, repair glass dust, save. Returns the Extract TIFFs and specks repaired in each."""
         s = self.settings
-        extracts = []
-        regions = find_prints(scan, meta.dpi, min_side_cm=s.min_side_cm)
+        calibration = self._calibration_by_id(cal_id)
+        extracts, dust = [], {}
+        regions = find_prints(scan, meta.dpi, min_side_cm=s.min_side_cm, calibration=calibration)
         for i, region in enumerate(regions, start=1):
             image = cut(scan, region, inset_px=s.inset_px)
             tif = self.path / "extracts" / f"{scan_path.stem}_p{i:02d}.tif"
+            if calibration is not None:
+                image, dust[tif.stem] = repair_dust(image, calibration, region, inset_px=s.inset_px)
             write_tiff(tif, image, meta)
             write_jpeg(tif.with_suffix(".jpg"), image, meta, quality=s.jpeg_quality)
             extracts.append(tif)
-        return extracts
+        return extracts, dust
+
+    def _calibration_by_id(self, cal_id: str | None) -> Calibration | None:
+        if cal_id is None:
+            return None
+        if cal_id not in self._loaded:
+            entry = next(c for c in self._record["calibrations"] if c["id"] == cal_id)
+            empty, _ = read_tiff(self._calibration_path(cal_id))
+            self._loaded[cal_id] = detect.calibrate(empty, entry["dpi"])
+        return self._loaded[cal_id]
+
+    def _calibration_path(self, cal_id: str) -> Path:
+        return self.path / "calibration" / f"{cal_id}.tif"
 
 
 def rotate_extract(path: Path, degrees: int, *, jpeg_quality: int = 95) -> None:

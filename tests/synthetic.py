@@ -38,12 +38,20 @@ def make_scan(
     shape: tuple[int, int] = (1754, 1275),  # A4 at 150 dpi, (height, width)
     background: tuple[int, int, int] = DARK,
     dust: int = 0,
+    glass_dust: list[tuple[int, int]] = (),
+    vignette: int = 0,
     seed: int = 0,
 ) -> np.ndarray:
+    """A fake Scan. `glass_dust` specks sit on the glass, so they show at the
+    same place on every Scan, over Prints too. `vignette` darkens the glass
+    edge (left columns) by that much, like the real LiDE 400 does slightly."""
     rng = np.random.default_rng(seed)
     height, width = shape
     scan = np.empty((height, width, 3), np.float32)
     scan[:] = background
+    if vignette:
+        fade = np.clip(1 - np.arange(width) / 12, 0, 1)
+        scan -= (vignette * fade)[None, :, None]
     scan += rng.normal(0, 2, scan.shape)
     scan = np.clip(scan, 0, 255).astype(np.uint8)
 
@@ -70,4 +78,6 @@ def make_scan(
     for _ in range(dust):
         x, y = int(rng.integers(0, width)), int(rng.integers(0, height))
         cv2.circle(scan, (x, y), int(rng.integers(1, 4)), (230, 230, 230), -1)
+    for x, y in glass_dust:
+        cv2.circle(scan, (x, y), 2, (90, 80, 70), -1)
     return scan

@@ -31,6 +31,9 @@ def session(
     dpi: Annotated[int | None, typer.Option(help="Overrides the config (default 600)")] = None,
     deep: Annotated[bool, typer.Option("--16bit", help="16 bits per channel")] = False,
     preview: Annotated[bool, typer.Option(help="Check the cuts after each Scan")] = False,
+    calibrate: Annotated[
+        bool, typer.Option(help="Scan the empty glass first (background + dust)")
+    ] = True,
 ) -> None:
     """Scan batch after batch of Prints, cutting each Scan into Extracts."""
     cfg = config.load()
@@ -46,12 +49,23 @@ def session(
 
     total = 0
     try:
+        if calibrate:
+            _calibrate(s, scanner, dpi, deep)
         while True:
-            answer = typer.prompt(
-                "Place Prints, then Enter to scan (q to finish)", default="", show_default=False
+            answer = (
+                typer.prompt(
+                    "Place Prints, then Enter to scan (c to recalibrate, q to finish)",
+                    default="",
+                    show_default=False,
+                )
+                .strip()
+                .lower()
             )
-            if answer.strip().lower() == "q":
+            if answer == "q":
                 break
+            if answer == "c":
+                _calibrate(s, scanner, dpi, deep)
+                continue
             try:
                 image = scanner.scan(dpi, deep=deep)
             except ScannerError as error:
@@ -133,6 +147,29 @@ def show_config() -> None:
     typer.echo(f"{path}\n\n{path.read_text()}")
 
 
+def _calibrate(s: Session, scanner: Scanner, dpi: int, deep: bool) -> None:
+    """Scan the empty glass; retried until it works or is skipped."""
+    while True:
+        answer = typer.prompt(
+            "Calibration: empty the glass, close the lid (or lay the cloth), then Enter"
+            " (s to skip)",
+            default="",
+            show_default=False,
+        )
+        if answer.strip().lower() == "s":
+            typer.echo("Not calibrated: the background is estimated from each Scan's border.")
+            return
+        try:
+            cal = s.calibrate(scanner.scan(dpi, deep=deep), dpi, scanner=scanner.name)
+        except ScannerError as error:
+            typer.secho(f"Calibration scan failed: {error}", fg="red", err=True)
+            continue
+        typer.echo(f"Calibrated: noise {cal.noise:.1f}, {cal.dust_specks} dust speck(s) on glass")
+        if cal.dust_specks > 50:
+            typer.secho("That's a lot of dust: clean the glass, then press c.", fg="yellow")
+        return
+
+
 def _start_backup(cfg: config.Config) -> backup.BackgroundSync | None:
     if not cfg.nas_dir:
         typer.echo("No nas_dir configured: files stay local (see `photoscan config`).")
@@ -165,7 +202,8 @@ def _rejected_after_preview(image: np.ndarray, dpi: int, s: Session) -> bool:
     small = (image >> 8).astype(np.uint8) if image.dtype == np.uint16 else image
     scale = 1200 / max(small.shape[:2])
     small = np.ascontiguousarray(cv2.resize(small, None, fx=scale, fy=scale))
-    for i, r in enumerate(find_prints(image, dpi, min_side_cm=s.settings.min_side_cm), start=1):
+    regions = find_prints(image, dpi, min_side_cm=s.settings.min_side_cm, calibration=s.calibration)
+    for i, r in enumerate(regions, start=1):
         rect = ((r.center[0] * scale, r.center[1] * scale),
                 (r.size[0] * scale, r.size[1] * scale), r.angle)  # fmt: skip
         box = cv2.boxPoints(rect).astype(np.int32)

@@ -194,3 +194,68 @@ def test_session_from_before_records_existed_still_opens(tmp_path, two_print_sca
     Session.load(path).add_scan(two_print_scan, DPI)
 
     assert json.loads((path / "session.json").read_text())["totals"]["scans"] == 1
+
+
+GLASS_DUST = [(640, 1100), (1100, 150)]
+
+
+def _calibrated(tmp_path):
+    session = Session.open(tmp_path, "Grandma", DAY)
+    session.calibrate(make_scan([], glass_dust=GLASS_DUST, seed=5), DPI, scanner="pixma:x")
+    return session
+
+
+def test_calibration_is_saved_and_recorded(tmp_path):
+    session = _calibrated(tmp_path)
+
+    (cal,) = _record(session)["calibrations"]
+    assert (session.path / "calibration" / "cal_01.tif").exists()
+    assert cal["id"] == "cal_01"
+    assert cal["scanner"] == "pixma:x"
+    assert cal["dpi"] == DPI
+    assert cal["dust_specks"] == 2
+    assert cal["threshold"] >= 8
+    assert len(cal["background_lab"]) == 3
+    assert datetime.fromisoformat(cal["calibrated_at"])
+
+
+def test_scans_record_their_calibration_and_dust_repairs(tmp_path):
+    session = _calibrated(tmp_path)
+    scan = make_scan(
+        [FakePrint((300, 300), (450, 300)), FakePrint((600, 1200), (300, 450))],
+        glass_dust=GLASS_DUST,
+    )
+
+    session.add_scan(scan, DPI)
+
+    (entry,) = _record(session)["scans"]
+    assert entry["calibration"] == "cal_01"
+    # (640, 1100) lies on the second Print; (1100, 150) on neither.
+    assert entry["dust_repaired"] == {"grandma_s001_p01": 0, "grandma_s001_p02": 1}
+
+
+def test_recalibrating_mid_session_numbers_the_next_calibration(tmp_path):
+    session = _calibrated(tmp_path)
+    session.calibrate(make_scan([]), DPI)
+
+    assert [c["id"] for c in _record(session)["calibrations"]] == ["cal_01", "cal_02"]
+
+
+def test_recut_reuses_the_scans_own_calibration(tmp_path):
+    session = _calibrated(tmp_path)
+    scan = make_scan([FakePrint((600, 1200), (300, 450))], glass_dust=GLASS_DUST)
+    result = session.add_scan(scan, DPI)
+    session.calibrate(make_scan([]), DPI)  # a later calibration, without dust
+
+    Session.load(session.path).recut(result.scan)
+
+    (entry,) = _record(session)["scans"]
+    assert entry["calibration"] == "cal_01"
+    assert entry["dust_repaired"] == {"grandma_s001_p01": 1}
+
+
+def test_uncalibrated_scans_say_so(tmp_path):
+    session = Session.open(tmp_path, "Grandma", DAY)
+    session.add_scan(make_scan([FakePrint((600, 700), (450, 300))]), DPI)
+
+    assert _record(session)["scans"][0]["calibration"] is None

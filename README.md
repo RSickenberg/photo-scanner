@@ -34,7 +34,14 @@ config to choose one. Scanners SANE can't drive need a new backend in
 photoscan session "Grandma album 1970s"
 ```
 
-Lay the Prints on the glass **with a gap of about 1 cm between them**, then
+Each Session starts with a **Calibration**: empty the glass, close the lid
+(or lay the black cloth), and press Enter. `photoscan` learns what the
+background looks like and where the dust is on the glass. Press `c` during
+the Session to recalibrate, for example after switching between lid and cloth
+or cleaning the glass. `s` or `--no-calibrate` skips it.
+
+Lay the Prints on the glass **with a gap of about 1 cm between them**, about
+5 mm from the glass edges, then
 **cover them with a black cloth or sheet** instead of closing the white lid.
 Detection is reliable on a dark background, but photos with white borders get
 lost on the white lid. Press Enter to scan. Repeat with the next batch, and
@@ -54,6 +61,7 @@ Each Session produces:
 ```
 ~/Pictures/photoscan/2026-09-24_grandma-album-1970s/
   session.json
+  calibration/cal_01.tif                       empty glass, reference for the Session
   scans/grandma-album-1970s_s001.tif          whole Scan, kept for re-cutting
   extracts/grandma-album-1970s_s001_p01.tif   lossless archive copy
   extracts/grandma-album-1970s_s001_p01.jpg   for sharing
@@ -62,9 +70,17 @@ Each Session produces:
 The Label and the date are embedded in every file (XMP title/description,
 EXIF/TIFF date).
 
-`session.json` keeps a record of the Session: for every Scan, when it was
-scanned, by which scanner, at which dpi and bit depth, and which Extracts came
-out of it. It also holds running totals. Discarding a Scan from the preview
+**Glass dust** found by the Calibration is repaired in the Extracts (TIFF and
+JPEG). A speck is only repaired where the Extract shows the same speck, at
+the same place and with the same shape. Lint on the lid shows up in the
+Calibration too, but it ends up behind the Print, so it's left alone there.
+The untouched Scan in `scans/` always keeps the original.
+
+`session.json` keeps a record of the Session: every Calibration (time,
+scanner, dpi, background colour, noise, detection cut-off, specks found) and,
+for every Scan, when it was scanned, by which scanner, at which dpi and bit
+depth, which Calibration it used, which Extracts came out of it, and how many
+dust specks were repaired in each. It also holds running totals. Discarding a Scan from the preview
 removes it from the record, and `recut` updates its Extracts and adds a
 `recut_at` time.
 
@@ -72,6 +88,18 @@ removes it from the record, and `recut` updates its Extracts and adds a
 {
   "label": "Grandma album 1970s",
   "date": "2026-09-24",
+  "calibrations": [
+    {
+      "id": "cal_01",
+      "calibrated_at": "2026-09-24T19:00:42",
+      "scanner": "pixma:04A91912_4FA05A",
+      "dpi": 600,
+      "background_lab": [234.3, 128.1, 129.2],
+      "noise": 2.12,
+      "threshold": 8.0,
+      "dust_specks": 1940
+    }
+  ],
   "scans": [
     {
       "scan": "grandma-album-1970s_s001",
@@ -79,7 +107,9 @@ removes it from the record, and `recut` updates its Extracts and adds a
       "scanner": "pixma:04A91912_4FA05A",
       "dpi": 600,
       "bits": 8,
-      "extracts": ["grandma-album-1970s_s001_p01", "grandma-album-1970s_s001_p02"]
+      "calibration": "cal_01",
+      "extracts": ["grandma-album-1970s_s001_p01", "grandma-album-1970s_s001_p02"],
+      "dust_repaired": { "grandma-album-1970s_s001_p01": 2, "grandma-album-1970s_s001_p02": 0 }
     }
   ],
   "totals": { "scans": 1, "extracts": 2 }
@@ -88,7 +118,7 @@ removes it from the record, and `recut` updates its Extracts and adds a
 
 | Command | What it does |
 |---|---|
-| `photoscan session [LABEL]` | Scan batch after batch |
+| `photoscan session [LABEL]` | Calibrate, then scan batch after batch |
 | `photoscan recut scans/*.tif` | Redo the Extracts of existing Scans |
 | `photoscan rotate FILE… --degrees 90` | Turn Extracts clockwise (TIFF and JPEG together) |
 | `photoscan sync` | Copy anything not yet on the NAS, verifying each file |

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from photoscan.detect import cut, find_prints
+from photoscan.detect import calibrate, cut, find_prints, repair_dust
 from tests.synthetic import DARK, WHITE, FakePrint, make_scan
 
 DPI = 150
@@ -114,3 +114,75 @@ def test_polaroids_on_the_white_lid_keep_their_frame():
     for extract in extracts:
         assert extract.shape[1] == pytest.approx(450, abs=10)
         assert extract.shape[0] == pytest.approx(540, abs=10)
+
+
+GLASS_DUST = [(200, 150), (640, 700), (700, 760), (1000, 1500)]
+
+
+def test_calibration_measures_the_background_and_finds_glass_dust():
+    empty = make_scan([], background=WHITE, glass_dust=GLASS_DUST)
+
+    calibration = calibrate(empty, DPI)
+
+    assert calibration.dust_specks == len(GLASS_DUST)
+    for x, y in GLASS_DUST:
+        assert calibration.dust[y, x]
+    assert calibration.noise < 5
+
+
+def test_calibrated_detection_ignores_vignetting_at_the_glass_edge():
+    # The Print touches the darkened edge: uncalibrated, the vignette would
+    # stretch its box; the calibration's reference cancels it out.
+    prints = [FakePrint((233, 700), (450, 300))]
+    empty = make_scan([], background=WHITE, vignette=20, seed=1)
+    scan = make_scan(prints, background=WHITE, vignette=20, seed=2)
+
+    (region,) = find_prints(scan, DPI, calibration=calibrate(empty, DPI))
+
+    assert region.size[0] == pytest.approx(450, abs=6)
+    assert region.size[1] == pytest.approx(300, abs=6)
+
+
+def test_glass_dust_is_repaired_in_the_extract():
+    prints = [FakePrint((600, 700), (600, 400))]
+    calibration = calibrate(make_scan([], glass_dust=GLASS_DUST, seed=1), DPI)
+    clean = make_scan(prints, seed=2)
+    dusty = make_scan(prints, glass_dust=GLASS_DUST, seed=2)
+    (region,) = find_prints(dusty, DPI, calibration=calibration)
+
+    repaired, spots = repair_dust(cut(dusty, region), calibration, region)
+
+    assert spots == 2  # the two specks that lie on the Print
+    reference = cut(clean, region).astype(int)
+    before = np.abs(cut(dusty, region).astype(int) - reference).max()
+    after = np.abs(repaired.astype(int) - reference).max()
+    assert before > 60
+    assert after < before / 2
+
+
+def test_lint_on_the_lid_hidden_behind_a_print_is_not_repaired():
+    # The empty-glass Scan can't tell glass dust from lint on the lid's pad.
+    # Glass dust shows on the Print; lid lint ends up behind it, so the Extract
+    # must be left alone there.
+    glass, lid = (640, 700), (800, 600)
+    calibration = calibrate(make_scan([], glass_dust=[glass, lid], seed=1), DPI)
+    prints = [FakePrint((600, 700), (600, 400))]
+    scan = make_scan(prints, glass_dust=[glass], seed=2)
+    (region,) = find_prints(scan, DPI, calibration=calibration)
+
+    repaired, spots = repair_dust(cut(scan, region), calibration, region)
+
+    assert spots == 1
+    x, y = lid[0] - 300 - 2, lid[1] - 500 - 2  # into Extract coordinates (inset 2)
+    np.testing.assert_array_equal(
+        repaired[y - 5 : y + 5, x - 5 : x + 5], cut(scan, region)[y - 5 : y + 5, x - 5 : x + 5]
+    )
+
+
+def test_dense_lint_is_all_found_and_does_not_inflate_the_threshold():
+    # Real lid (2026-09-24): ~1900 fibres. Noise estimates must stay robust to
+    # them: frames ~12 units away must still pass, and every speck be found.
+    lint = [(x, y) for x in range(20, 1260, 25) for y in range(20, 1740, 25)]
+    calibration = calibrate(make_scan([], background=WHITE, glass_dust=lint), DPI)
+    assert calibration.threshold == 8
+    assert calibration.dust_specks == len(lint)

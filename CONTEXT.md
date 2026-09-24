@@ -27,6 +27,19 @@ Free-text name given to a Session by the user (e.g. "Grandma album 1970s").
 It names the Session's folder and files and is written into each Extract's
 metadata.
 
+**Calibration**
+A Scan of the empty glass (lid closed or black cloth laid) made at the start
+of a Session, or again mid-Session. It is the reference for what "background"
+looks like, and where the specks are. Later Scans in the Session are compared
+against it.
+
+**Glass dust**
+Specks lying on the scanner glass. They show at the same place and with the
+same shape on every Scan, over Prints too, and are repaired in Extracts.
+Distinct from **lint on the lid**, which also appears in a Calibration but
+ends up behind the Print and never shows on it, so it is never repaired.
+Dust on the Prints themselves is out of scope.
+
 **Backup**
 The copy of a Session's Scans and Extracts on the NAS, which is the
 long-term home of the archive.
