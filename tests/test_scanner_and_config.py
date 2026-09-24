@@ -19,9 +19,16 @@ def test_scan_command_for_the_lide_400():
     cmd = SaneScanner(device="pixma:04A91912").command(600, False, Path("/tmp/x.tif"))
     assert cmd == [
         "/opt/homebrew/bin/scanimage", "--device-name", "pixma:04A91912",
-        "--format=tiff", "--mode", "Color", "--resolution", "600", "--depth", "8",
+        "--format=tiff", "--mode", "Color", "--resolution", "600",
         "--output-file", "/tmp/x.tif",
     ]  # fmt: skip
+
+
+def test_16_bit_uses_the_pixma_48_bit_colour_mode():
+    # The pixma backend has no --depth option; 16 bits per channel is a mode.
+    cmd = SaneScanner().command(600, True, Path("/tmp/x.tif"))
+    assert cmd[cmd.index("--mode") + 1] == "48 bits color"
+    assert "--depth" not in cmd
 
 
 def test_scan_reads_back_the_image_scanimage_wrote():

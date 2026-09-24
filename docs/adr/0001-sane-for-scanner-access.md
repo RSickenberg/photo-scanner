@@ -1,7 +1,7 @@
 # 1. Drive the scanner through SANE, from Python
 
 Date: 2026-09-24
-Status: Accepted (pending a spike on the real Canon CanoScan LiDE 400)
+Status: Accepted (verified on the real LiDE 400, 2026-09-24)
 
 ## Context
 

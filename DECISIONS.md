@@ -26,11 +26,11 @@ to be tracked. Never delete an entry; supersede or reopen it instead.
 
 ## D-001 (2026-09-24) — Python + SANE for scanner access
 
-- **Status:** decided (pending a test on the real scanner)
+- **Status:** decided (verified on the real scanner 2026-09-24)
 - **Foundational:** yes
 - **Decision:** Python, driving `scanimage` (Homebrew `sane-backends`, `pixma` backend); detection and cutting with OpenCV. Details in `docs/adr/0001-sane-for-scanner-access.md`.
 - **Why:** detection logic is plain, testable Python; SANE lists the LiDE 400 as supported. Swift + ImageCaptureCore + Vision rejected for now (harder CLI setup, fewer references), but agreed as the fallback.
-- **Premises:** `scanimage -L` sees the LiDE 400 over USB on this Mac (macOS 27). Not yet verified: scanner was unplugged on 2026-09-24.
+- **Premises:** `scanimage -L` sees the LiDE 400 over USB on this Mac (macOS 27) as `pixma:04A91912_…`: verified 2026-09-24, 8-bit (`--mode Color`) and 16-bit (`--mode "48 bits color"`; pixma has no `--depth`) both scan.
 
 ## D-002 (2026-09-24) — Write locally, copy to the NAS in the background
 

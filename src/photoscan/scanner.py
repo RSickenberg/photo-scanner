@@ -42,9 +42,9 @@ class SaneScanner:
             cmd += ["--device-name", self._device]
         return cmd + [
             "--format=tiff",
-            "--mode", "Color",
+            # pixma has no --depth: 16 bits per channel is its own mode.
+            "--mode", "48 bits color" if deep else "Color",
             "--resolution", str(dpi),
-            "--depth", "16" if deep else "8",
             "--output-file", str(out),
         ]  # fmt: skip
 
