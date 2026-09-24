@@ -1,8 +1,15 @@
 # Changelog
 
-## [v2.0.2](https://github.com/RSickenberg/photo-scanner/compare/v2.0.1...v2.0.2)
+## [v2.0.3](https://github.com/RSickenberg/photo-scanner/compare/v2.0.2...v2.0.3)
+
+- fix(detect): split Prints joined across a partly bridged gap [`f5541a1`](https://github.com/RSickenberg/photo-scanner/commit/f5541a1df303e073d3d6192c55d437377eda6631)
+- fix(detect): a caption between two Prints belongs to the nearest one only [`87eb42c`](https://github.com/RSickenberg/photo-scanner/commit/87eb42c0cfc4a544654005e84c2f68e76fc020d4)
+- feat(backs): keep the whole Back Scan as JPEG [`460812f`](https://github.com/RSickenberg/photo-scanner/commit/460812fb1c9ca9454b576614dce4204e7dd533ee)
+
+## [v2.0.2](https://github.com/RSickenberg/photo-scanner/compare/v2.0.1...v2.0.2) (2026-09-24)
 
 - fix: keep printed captions, pair white Backs, trust only confident OCR [`828658f`](https://github.com/RSickenberg/photo-scanner/commit/828658fbf67530ef267af49519e32b177244210c)
+- chore(release): 2.0.2 [`c854337`](https://github.com/RSickenberg/photo-scanner/commit/c854337efb2880fe4bddc42eab9737bfc9a9e572)
 
 ## [v2.0.1](https://github.com/RSickenberg/photo-scanner/compare/v2.0.0...v2.0.1) (2026-09-24)
 
