@@ -1,8 +1,13 @@
 # Changelog
 
-## [v2.0.1](https://github.com/RSickenberg/photo-scanner/compare/v2.0.0...v2.0.1)
+## [v2.0.2](https://github.com/RSickenberg/photo-scanner/compare/v2.0.1...v2.0.2)
+
+- fix: keep printed captions, pair white Backs, trust only confident OCR [`828658f`](https://github.com/RSickenberg/photo-scanner/commit/828658fbf67530ef267af49519e32b177244210c)
+
+## [v2.0.1](https://github.com/RSickenberg/photo-scanner/compare/v2.0.0...v2.0.1) (2026-09-24)
 
 - fix(detect): don't join Prints when the lid shades differently than at calibration [`c920949`](https://github.com/RSickenberg/photo-scanner/commit/c9209499d1c6d5136d3acc330fa9374ced0fcb8f)
+- chore(release): 2.0.1 [`b416b7a`](https://github.com/RSickenberg/photo-scanner/commit/b416b7ad4e506bf3d14bf9d7c649e5f33fbc9f8a)
 
 ## [v2.0.0](https://github.com/RSickenberg/photo-scanner/compare/v1.0.0...v2.0.0) (2026-09-24)
 
