@@ -92,3 +92,23 @@ def test_date_priority_typed_then_back_then_front_then_source():
     assert choose_date(None, [], front, estimate) == (PhotoDate(1987, 6, 12), "ocr-front")
     assert choose_date(None, ["no date here"], [], estimate) == (estimate, "source")
     assert choose_date(None, [], [], None) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("ocr", "expected"),
+    [
+        # Real Fujifilm back (2026-09-24): lab code with a year-first date, and a month.
+        ("Film 412-788 99.12.25 No.31", [PhotoDate(1999, 12, 25)]),
+        ("SHO 03.2000", [PhotoDate(2000, 3)]),
+        # Real Kodak back: day-first with a four-digit year.
+        ("LA09_24121c JP9 500 2 231511 13.07.2009", [PhotoDate(2009, 7, 13)]),
+    ],
+)
+def test_find_dates_on_real_lab_backs(ocr, expected):
+    assert find_dates(ocr) == expected
+
+
+def test_the_most_precise_then_earliest_date_wins():
+    # The picture is taken before it's printed: Christmas 1999, printed March 2000.
+    back = ["SHO 03.2000", "Film 412-788 99.12.25 No.31"]
+    assert choose_date(None, back, [], None) == (PhotoDate(1999, 12, 25), "ocr-back")

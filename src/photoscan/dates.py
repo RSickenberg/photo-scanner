@@ -94,8 +94,12 @@ def find_dates(text: str) -> list[PhotoDate]:
     patterns = [
         # 1985-06-15
         (r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", lambda m: (m[1], m[2], m[3])),
+        # 99.12.25: year first, recognisable when the first number can't be a day
+        (r"\b(3[2-9]|[4-9]\d)[./-](\d{1,2})[./-](\d{1,2})\b", lambda m: (m[1], m[2], m[3])),
         # 18.05.98, 12/03/2004, 18-05-1998 (day first: European prints)
         (r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})\b", lambda m: (m[3], m[2], m[1])),
+        # 03.2000: month and year (not preceded by a day: "18.05.2009" is handled above)
+        (r"(?<![\d./-])(\d{1,2})[./](\d{4})\b", lambda m: (m[2], m[1], None)),
         # camera imprints: '87 6 12 (year first) and 6 12 '87 (year last)
         (r"['’](\d{2})\s+(\d{1,2})\s+(\d{1,2})\b", lambda m: (m[1], m[2], m[3])),
         (r"\b(\d{1,2})\s+(\d{1,2})\s+['’](\d{2})\b", lambda m: (m[3], m[1], m[2])),
@@ -143,7 +147,10 @@ def choose_date(
         return typed, "typed"
     for texts, source in ((back_text, "ocr-back"), (front_text, "ocr-front")):
         if found := [d for t in texts for d in find_dates(t)]:
-            return found[0], source
+            # Most precise first; then the earliest, since a picture is taken
+            # before it's printed (e.g. taken 1999-12-25, printed 03.2000).
+            rank = {"day": 0, "month": 1, "year": 2, "decade": 3}
+            return min(found, key=lambda d: (rank[d.precision], d.first_day())), source
     if estimate:
         return estimate, "source"
     return None, None

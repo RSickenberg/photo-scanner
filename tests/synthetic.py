@@ -16,6 +16,7 @@ class FakePrint:
     angle: float = 0.0  # degrees, counter-clockwise
     border: bool = False  # classic white border around the image
     frame: tuple[int, int, int] | None = None  # Polaroid-style wide frame of this colour
+    caption: bool = False  # white strip with printed text along the bottom (lab prints)
 
 
 def _texture(width: int, height: int, rng: np.random.Generator) -> np.ndarray:
@@ -67,6 +68,17 @@ def make_scan(
             content[:f], content[-f:], content[:, :f], content[:, -f:] = [p.frame] * 4
             content[f : h // 2, f:-f] = 20
             content[h // 2 : -f, f:-f] = 235
+        if p.caption:
+            # Paper barely off the white lid (measured: 2-5 units), printed text,
+            # and the paper edge's thin highlight, as on a real LiDE 400 Scan.
+            c = h // 6
+            content[-c:] = (237, 237, 235)
+            text_at, size, stroke = (w // 10, h - c // 2), w / 700, max(2, w // 150)
+            cv2.putText(
+                content, "20KM DE LAUSANNE 2009", text_at, cv2.FONT_HERSHEY_SIMPLEX,
+                size, (30, 30, 30), stroke,
+            )  # fmt: skip
+            content[-2:] = 252
         # Paste the (possibly rotated) print through a mask.
         m = cv2.getRotationMatrix2D((w / 2, h / 2), p.angle, 1.0)
         m[0, 2] += p.center[0] - w / 2

@@ -247,3 +247,27 @@ def test_shade_between_prints_does_not_join_them_when_calibrated():
 
     assert len(regions) == 2
     assert [round(r.size[0]) for r in regions] == pytest.approx([450, 450], abs=8)
+
+
+@pytest.mark.parametrize("angle", [0.0, -2.0])
+@pytest.mark.parametrize("calibrated", [False, True])
+def test_a_printed_caption_strip_stays_with_its_print(angle, calibrated):
+    # Real case (2026-09-24): "20KM DE LAUSANNE 2009" printed on a white strip
+    # under the photo, on the white lid. The strip's paper is only 2-5 units off
+    # the lid, so only its text was detected, as fragments, and the strip was cut off.
+    empty = make_scan([], background=WHITE, seed=1)
+    prints = [FakePrint((600, 800), (700, 840), angle=angle, caption=True)]
+    scan = make_scan(prints, background=WHITE, seed=2)
+    calibration = calibrate(empty, DPI) if calibrated else None
+
+    (region,) = find_prints(scan, DPI, calibration=calibration)
+
+    assert region.size[0] == pytest.approx(700, abs=10)
+    assert region.size[1] == pytest.approx(840, abs=10)  # caption included, no lid added
+
+
+def test_no_caption_no_extension_even_next_to_another_print():
+    # 50 px (~8 mm) of plain lid between the two: no text, so neither is extended.
+    prints = [FakePrint((330, 500), (450, 600)), FakePrint((830, 500), (450, 600))]
+    regions = find_prints(make_scan(prints, background=WHITE), DPI)
+    assert [round(r.size[0]) for r in regions] == pytest.approx([450, 450], abs=6)

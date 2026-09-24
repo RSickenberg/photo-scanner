@@ -4,7 +4,7 @@
     <root>/archive/<source>/source.json               the Source's record (never pruned)
     <root>/archive/<source>/scans/<source>_s001.tif   whole Scans (+ _back.tif)
     <root>/archive/<source>/masters/<source>_s001_p01.tif   lossless Extracts
-    <root>/archive/<source>/backs/<source>_s001_p01_back.tif (+ .jpg)
+    <root>/archive/<source>/backs/<source>_s001_p01_back.jpg
     <root>/archive/_sessions/<date>_01.json           each sitting: calibrations, Scans made
     <root>/archive/_calibrations/<date>_01_cal_01.tif  empty-glass Scans
 
@@ -24,10 +24,21 @@ import numpy as np
 
 from photoscan import detect
 from photoscan.dates import PhotoDate, choose_date
-from photoscan.detect import Calibration, Region, cut, find_prints, match_backs, repair_dust
+from photoscan.detect import (
+    Calibration,
+    Region,
+    cut,
+    distance_outside,
+    enclose,
+    find_prints,
+    match_backs,
+    repair_dust,
+)
 from photoscan.imagefiles import Meta, read_tiff, write_jpeg, write_tiff
 
 Reader = Callable[[np.ndarray], list[str]]
+# How far a Print may move when flipped for its Back to still be paired.
+BACK_TOLERANCE_CM = 3.0
 
 
 @dataclass(frozen=True)
@@ -243,8 +254,8 @@ class Source:
     def photo(self, extract: str) -> Path:
         return self.archive.photos / self.slug / f"{extract}.jpg"
 
-    def back(self, name: str, suffix: str = ".tif") -> Path:
-        return self.path / "backs" / f"{name}{suffix}"
+    def back(self, name: str) -> Path:
+        return self.path / "backs" / f"{name}.jpg"
 
     # --- changes ---------------------------------------------------------------
 
@@ -385,15 +396,28 @@ class Source:
         scale = dpi / entry["dpi"]
         fronts = [_region(item["region"], scale) for item in entry["extracts"]]
         pairs, unmatched = match_backs(fronts, found, dpi)
+        # A pale Back on a pale lid can come out as several pieces, none the size
+        # of its front (real white Kodak back, 2026-09-24). Pieces lying where an
+        # unpaired front was are its Back; it's cut from the front's footprint
+        # plus those pieces, so nothing is lost if the Print moved a little. A
+        # Back that wasn't detected at all is still cut from the footprint: its
+        # faint printing may be readable even if it wasn't seen as a Print.
+        tolerance = BACK_TOLERANCE_CM / 2.54 * dpi
+        pieces: dict[int, list[int]] = {f: [] for f in range(len(fronts)) if f not in pairs}
+        for b in list(unmatched):
+            gaps = {f: distance_outside(fronts[f], found[b].center) for f in pieces}
+            if gaps and min(gaps.values()) <= tolerance:
+                pieces[min(gaps, key=gaps.get)].append(b)
+                unmatched.remove(b)
         self.back("x").parent.mkdir(parents=True, exist_ok=True)
         meta = self._meta(entry, dpi=dpi)
         matched = {}
         for f, item in enumerate(entry["extracts"]):
-            item["back"], item["text_back"] = None, []
-            if f not in pairs:
-                self._stamp(entry, item)
-                continue
-            image = cut(back, found[pairs[f]], inset_px=s.inset_px)
+            if f in pairs:
+                where = found[pairs[f]]
+            else:
+                where = enclose([fronts[f], *(found[b] for b in pieces[f])])
+            image = cut(back, where, inset_px=s.inset_px)
             item["back"] = f"{item['name']}_back"
             item["text_back"] = self.archive.reader(image)
             self._write_back(item["back"], image, meta)
@@ -407,8 +431,8 @@ class Source:
         return BackResult(matched, entry["unmatched_backs"])
 
     def _write_back(self, name: str, image: np.ndarray, meta: Meta) -> None:
-        write_tiff(self.back(name), image, meta)
-        write_jpeg(self.back(name, ".jpg"), image, meta, quality=self.archive.settings.jpeg_quality)
+        # Backs are kept for what's printed on them: a JPEG is enough.
+        write_jpeg(self.back(name), image, meta, quality=self.archive.settings.jpeg_quality)
 
     def _stamp(self, entry: dict, item: dict, image: np.ndarray | None = None) -> None:
         """Resolve the Extract's Photo date and (re)write its master and photo."""

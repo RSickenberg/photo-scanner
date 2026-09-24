@@ -27,6 +27,11 @@ _DUST_MIN_CONTRAST = 12.0
 # (correlation of speck contrast). Measured on a real lid: lint projected onto
 # real Polaroids scored p99 0.48, and only 1 of 498 exceeded 0.6.
 _DUST_MIN_MATCH = 0.6
+# Printed captions: text fragments this close to a Print's side (cm) extend
+# that side over them, then up to the paper's edge if one is found just beyond.
+_CAPTION_REACH_CM = 2.5
+_CAPTION_EDGE_SEARCH_CM = 1.5
+_CAPTION_EDGE_MIN_STEP = 2.0  # Lab L units: paper vs lid, or the edge's highlight
 
 
 @dataclass(frozen=True)
@@ -89,14 +94,18 @@ def find_prints(
 
     min_side_px = min_side_cm / 2.54 * dpi * scale
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    regions = []
+    regions, fragments = [], np.zeros_like(mask)
     for contour in contours:
         (cx, cy), (w, h), angle = cv2.minAreaRect(contour)
         if min(w, h) < min_side_px:
+            cv2.drawContours(fragments, [contour], -1, 255, cv2.FILLED)
             continue
-        regions.append(_normalise(cx / scale, cy / scale, w / scale, h / scale, angle))
+        regions.append(_normalise(cx, cy, w, h, angle))
 
-    return _reading_order(regions)
+    px_per_cm = dpi * scale / 2.54
+    lightness = _lab(small)[..., 0]
+    regions = [_attach_caption(r, fragments, lightness, px_per_cm) for r in regions]
+    return _reading_order([_scaled(r, 1 / scale) for r in regions])
 
 
 def cut(scan: np.ndarray, region: Region, *, inset_px: int = 2) -> np.ndarray:
@@ -163,6 +172,21 @@ def match_backs(
     return pairs, unmatched
 
 
+def distance_outside(region: Region, point: tuple[float, float]) -> float:
+    """How far `point` lies outside `region` (0 when inside), in pixels."""
+    box = cv2.boxPoints((region.center, region.size, region.angle)).astype(np.float32)
+    return max(0.0, -cv2.pointPolygonTest(box, (float(point[0]), float(point[1])), True))
+
+
+def enclose(regions: list[Region]) -> Region:
+    """The smallest (rotated) box around all these regions."""
+    points = np.concatenate([cv2.boxPoints((r.center, r.size, r.angle)) for r in regions]).astype(
+        np.float32
+    )
+    (cx, cy), (w, h), angle = cv2.minAreaRect(points)
+    return _normalise(cx, cy, w, h, angle)
+
+
 def _upright(image: np.ndarray, region: Region, inset_px: int, interpolation: int) -> np.ndarray:
     (cx, cy), (w, h) = region.center, region.size
     rotation = cv2.getRotationMatrix2D((cx, cy), region.angle, 1.0)
@@ -175,6 +199,76 @@ def _upright(image: np.ndarray, region: Region, inset_px: int, interpolation: in
     if inset_px:
         upright = upright[inset_px:-inset_px, inset_px:-inset_px]
     return upright
+
+
+def _attach_caption(
+    region: Region, fragments: np.ndarray, lightness: np.ndarray, px_per_cm: float
+) -> Region:
+    """Extend a Print over a printed caption on its own pale margin.
+
+    A white strip with printed text ("20KM DE LAUSANNE 2009") is barely off a
+    white lid (2-5 units on a real Scan): only its text is detected, as small
+    fragments next to the photo. A side with such fragments within reach is
+    extended over them, then up to the paper's edge (a highlight or a step in
+    lightness running along the side) if one is found just beyond. Without
+    text nearby, nothing is extended: streaks in the lid are straight too.
+    (Works in detection pixels.)
+    """
+    reach = round(_CAPTION_REACH_CM * px_per_cm)
+    search = round(_CAPTION_EDGE_SEARCH_CM * px_per_cm)
+    pad = reach + search
+    w, h = round(region.size[0]), round(region.size[1])
+    grown = Region(region.center, (w + 2 * pad, h + 2 * pad), region.angle)
+    near = _upright(fragments, grown, 0, cv2.INTER_NEAREST)
+    light = _upright(lightness, grown, 0, cv2.INTER_LINEAR)
+
+    # The Print occupies [pad, pad + h) x [pad, pad + w) in these upright views.
+    # Each side, as (fragment band, lightness band), both read outward from the side.
+    across, down = slice(pad, pad + w), slice(pad, pad + h)
+    sides = {
+        "top": (near[pad - reach : pad, across][::-1], light[:pad, across][::-1]),
+        "bottom": (near[pad + h : pad + h + reach, across], light[pad + h :, across]),
+        "left": (near[down, pad - reach : pad][:, ::-1].T, light[down, :pad][:, ::-1].T),
+        "right": (near[down, pad + w : pad + w + reach].T, light[down, pad + w :].T),
+    }
+    grow = {}
+    for side, (band, profile_band) in sides.items():
+        rows = np.flatnonzero(band.any(axis=1))
+        if not len(rows):
+            continue
+        text_end = int(rows[-1]) + 1
+        # Start past the text: its last strokes are a much stronger "step" than the edge.
+        edge = _paper_edge(profile_band.mean(axis=1), text_end + 4, search)
+        grow[side] = edge or text_end + 1
+    if not grow:
+        return region
+
+    # Grow the upright box, then map its new centre back onto the Scan.
+    top, bottom = grow.get("top", 0), grow.get("bottom", 0)
+    left, right = grow.get("left", 0), grow.get("right", 0)
+    shift = np.array([(right - left) / 2, (bottom - top) / 2])
+    rotation = cv2.getRotationMatrix2D((0, 0), -region.angle, 1.0)[:, :2]
+    cx, cy = np.array(region.center) + rotation @ shift
+    return Region((cx, cy), (w + left + right, h + top + bottom), region.angle)
+
+
+def _paper_edge(profile: np.ndarray, start: int, search: int) -> int | None:
+    """Where a pale margin ends, reading outward: the strongest highlight or
+    step in lightness between `start` and `start + search`, if clear enough."""
+    stop = min(len(profile) - 3, start + search)
+    best, where = 0.0, None
+    for d in range(max(start, 3), stop):
+        step = abs(profile[d - 3 : d].mean() - profile[d : d + 3].mean())
+        highlight = profile[d] - np.median(profile[max(0, d - 6) : d + 7])
+        score = max(step, highlight)
+        if score > best:
+            best, where = score, d + 1
+    return where if best >= _CAPTION_EDGE_MIN_STEP else None
+
+
+def _scaled(region: Region, factor: float) -> Region:
+    (cx, cy), (w, h) = region.center, region.size
+    return Region((cx * factor, cy * factor), (w * factor, h * factor), region.angle)
 
 
 def _to_8bit(scan: np.ndarray) -> np.ndarray:

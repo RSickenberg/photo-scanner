@@ -71,10 +71,14 @@ Add `--preview` to see each Scan with numbered boxes, and press `r` to throw
 away a bad cut and rescan. Add `--16bit` for special Prints. The default is
 600 dpi, 8 bits per channel.
 
+A printed caption on a white strip (e.g. "20KM DE LAUSANNE 2009" under a
+race photo) stays with its Print: the text is found next to the photo and the
+Print is extended over it, up to the strip's paper edge.
+
 Known limitation: on the white lid, Prints with large near-white areas (sky,
-white borders) can be split into pieces or missed. That's what the black
-cloth avoids. Because the whole Scan is always kept, `recut` can redo the
-cuts later.
+plain white borders without text) can be split into pieces or missed. That's
+what the black cloth avoids. Because the whole Scan is always kept, `recut`
+can redo the cuts later.
 
 ### Layout
 
@@ -84,7 +88,7 @@ cuts later.
   archive/album-grand-mere/source.json                            the Source's record
   archive/album-grand-mere/scans/album-grand-mere_s001.tif         whole Scans (+ _back.tif)
   archive/album-grand-mere/masters/album-grand-mere_s001_p01.tif   lossless Extracts
-  archive/album-grand-mere/backs/album-grand-mere_s001_p01_back.tif (+ .jpg)
+  archive/album-grand-mere/backs/album-grand-mere_s001_p01_back.jpg
   archive/_sessions/2026-09-24_01.json                             each sitting
   archive/_calibrations/2026-09-24_01_cal_01.tif                   empty-glass Scans
 ```
@@ -98,7 +102,10 @@ Ugreen Photos places photos by EXIF `DateTimeOriginal`, so that's where the
 Photo date goes, not the scan date. It's chosen in this order:
 
 1. a date you typed (`d` in the loop, or `photoscan date` later);
-2. a date printed on the Back (lab stamps), read by Apple Vision on the Mac;
+2. a date printed on the Back (lab stamps, e.g. `13.07.2009`, `99.12.25`,
+   `03.2000`), read by Apple Vision on the Mac. Only text Vision is confident
+   about is used, and when several dates are found, the most precise wins,
+   then the earliest (a picture is taken before it's printed);
 3. a date printed on the front (camera imprints, printed cards);
 4. the Source's rough date;
 5. otherwise unknown: no date is invented, and Ugreen falls back to the

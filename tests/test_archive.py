@@ -255,7 +255,7 @@ def test_back_pass_pairs_backs_with_fronts_and_reads_their_date(archive, reader,
         "album_s001_p02": "album_s001_p02_back",
     }
     assert back.unmatched == []
-    assert (tmp_path / "archive/album/backs/album_s001_p01_back.tif").exists()
+    assert (tmp_path / "archive/album/backs/album_s001_p01_back.jpg").exists()
     assert (tmp_path / "archive/album/scans/album_s001_back.tif").exists()
     assert not list((tmp_path / "photos").rglob("*_back*"))  # never in Ugreen's tree
     entry = _record(album)["scans"][0]["extracts"][0]
@@ -275,7 +275,7 @@ def test_a_back_that_matches_nothing_is_kept_and_reported(archive, tmp_path):
     back = session.add_back(album, front.scan, make_scan(far), DPI)
 
     assert back.unmatched == ["album_s001_back_unmatched_01"]
-    assert (tmp_path / "archive/album/backs/album_s001_back_unmatched_01.tif").exists()
+    assert (tmp_path / "archive/album/backs/album_s001_back_unmatched_01.jpg").exists()
 
 
 # --- Rotating --------------------------------------------------------------------
@@ -376,3 +376,29 @@ def test_recut_falls_back_to_uncalibrated_when_the_calibration_was_pruned(archiv
     assert entry["calibration"] == "2026-09-24_01_cal_01"  # history kept
     assert entry["calibration_missing"] is True
     assert [e["dust_repaired"] for e in entry["extracts"]] == [0, 0]
+
+
+def test_a_white_back_that_comes_out_in_pieces_is_still_paired(archive, tmp_path):
+    # Real case (2026-09-24): a white Kodak back on the white lid was detected as
+    # three pieces, none Print-sized, all saved as "unmatched".
+    session, album = archive.start_session(DAY), archive.source("Album")
+    front = session.add_scan(album, make_scan([FakePrint((600, 1200), (600, 450))]), DPI)
+    pieces = [FakePrint((450, 1180), (260, 400)), FakePrint((790, 1260), (200, 180), angle=-20)]
+
+    back = session.add_back(album, front.scan, make_scan(pieces, seed=9), DPI)
+
+    assert back.matched == {"album_s001_p01": "album_s001_p01_back"}
+    assert back.unmatched == []
+    with Image.open(tmp_path / "archive/album/backs/album_s001_p01_back.jpg") as img:
+        width, height = img.size
+    assert width >= 600 - 10 and height >= 450 - 10  # the whole footprint, not one piece
+
+
+def test_backs_are_saved_as_jpeg_only(archive, tmp_path):
+    session, album = archive.start_session(DAY), archive.source("Album")
+    front = session.add_scan(album, make_scan(TWO_PRINTS), DPI)
+
+    session.add_back(album, front.scan, make_scan(TWO_PRINTS, seed=9), DPI)
+
+    assert not list((tmp_path / "archive/album/backs").glob("*.tif"))
+    assert len(list((tmp_path / "archive/album/backs").glob("*.jpg"))) == 2
