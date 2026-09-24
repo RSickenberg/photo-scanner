@@ -1,0 +1,23 @@
+# An .aiignore file follows the same syntax as a .gitignore file.
+# .gitignore documentation: https://git-scm.com/docs/gitignore
+
+# secrets / env
+.env
+.env.*
+*.pem
+*.key
+
+# noise
+.DS_Store
+*.log
+*.tmp
+
+# build/deps output
+dist/
+build/
+out/
+var/
+vendor/
+node_modules/
+.next/
+.astro/

@@ -1,0 +1,20 @@
+{
+  "name": "photo-scanner",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Release tooling only: the app itself is Python (see pyproject.toml).",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RSickenberg/photo-scanner"
+  },
+  "license": "MIT",
+  "scripts": {
+    "release": "dotenv release-it"
+  },
+  "devDependencies": {
+    "@release-it/bumper": "^8.0.1",
+    "auto-changelog": "^2.6.1",
+    "dotenv-cli": "^11.0.0",
+    "release-it": "^21.1.0"
+  }
+}

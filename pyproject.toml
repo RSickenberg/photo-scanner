@@ -1,0 +1,43 @@
+[project]
+name = "photo-scanner"
+dynamic = ["version"]
+description = "Scan several family photos at once on a Canon LiDE 400 and cut each one into its own file."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.1",
+    "opencv-python-headless>=4.10",
+    "pillow>=11.0",
+    "tifffile>=2024.8",
+    "typer>=0.12",
+]
+
+[project.scripts]
+photoscan = "photoscan.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# VERSION is bumped by release-it (@release-it/bumper), see .release-it.ts
+[tool.hatch.version]
+path = "VERSION"
+pattern = "(?P<version>\\S+)"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/photoscan"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = [".claude", ".agents"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

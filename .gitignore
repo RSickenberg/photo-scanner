@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Node (release tooling)
+node_modules/
+
+# environment variables
+.env
+.env.*
+!.env.example
+
+# Never commit real Scans or Extracts: family photos live in output_dir / on the NAS.
+*.tif
+*.tiff
+*.jpg
+*.jpeg
+
+# macOS / IDE
+.DS_Store
+.idea/

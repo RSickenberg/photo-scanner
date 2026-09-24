@@ -1,0 +1,179 @@
+"""`photoscan`: the command line."""
+
+import subprocess
+import tempfile
+from datetime import date
+from pathlib import Path
+from typing import Annotated
+
+import cv2
+import numpy as np
+import typer
+
+from photoscan import backup, config
+from photoscan.detect import find_prints
+from photoscan.scanner import SaneScanner, Scanner, ScannerError
+from photoscan.session import Session, rotate_extract
+
+app = typer.Typer(
+    no_args_is_help=True,
+    help="Scan several family photos at once and cut each one into its own file.",
+)
+
+
+def make_scanner(cfg: config.Config) -> Scanner:
+    return SaneScanner(device=cfg.device)
+
+
+@app.command()
+def session(
+    label: Annotated[str | None, typer.Argument(help='e.g. "Grandma album 1970s"')] = None,
+    dpi: Annotated[int | None, typer.Option(help="Overrides the config (default 600)")] = None,
+    deep: Annotated[bool, typer.Option("--16bit", help="16 bits per channel")] = False,
+    preview: Annotated[bool, typer.Option(help="Check the cuts after each Scan")] = False,
+) -> None:
+    """Scan batch after batch of Prints, cutting each Scan into Extracts."""
+    cfg = config.load()
+    label = label or typer.prompt("Label for this Session")
+    dpi = dpi or cfg.dpi
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    day = date.today()
+    known = backup.known_names(cfg.output_dir, Session.folder(cfg.output_dir, label, day))
+    s = Session.open(cfg.output_dir, label, day, settings=cfg.cut, known=known)
+    scanner = make_scanner(cfg)
+    syncer = _start_backup(cfg)
+    typer.echo(f"Session: {s.path}")
+
+    total = 0
+    try:
+        while True:
+            answer = typer.prompt(
+                "Place Prints, then Enter to scan (q to finish)", default="", show_default=False
+            )
+            if answer.strip().lower() == "q":
+                break
+            try:
+                image = scanner.scan(dpi, deep=deep)
+            except ScannerError as error:
+                typer.secho(f"Scan failed: {error}", fg="red", err=True)
+                continue
+            result = s.add_scan(image, dpi)
+            typer.echo(f"{result.scan.name}: {len(result.extracts)} Extract(s)")
+            if preview and _rejected_after_preview(image, dpi, s):
+                s.discard(result.scan)
+                typer.echo("Discarded; rearrange the Prints and scan again.")
+                continue
+            total += len(result.extracts)
+            if syncer:
+                syncer.request()
+    finally:
+        if syncer:
+            typer.echo("Finishing the Backup to the NAS…")
+            syncer.close()
+    typer.echo(f"Done: {total} Extract(s) in {s.path}")
+
+
+@app.command()
+def recut(scans: Annotated[list[Path], typer.Argument(help="Scan TIFFs (scans/*.tif)")]) -> None:
+    """Redo the Extracts of existing Scans."""
+    cfg = config.load()
+    for scan in scans:
+        extracts = Session.load(scan.resolve().parents[1], settings=cfg.cut).recut(scan)
+        typer.echo(f"{scan.name}: {len(extracts)} Extract(s)")
+
+
+@app.command()
+def rotate(
+    extracts: Annotated[list[Path], typer.Argument(help="Extract files (.tif or .jpg)")],
+    degrees: Annotated[int, typer.Option(help="Clockwise: 90, 180 or 270")] = 90,
+) -> None:
+    """Turn Extracts that came out sideways or upside down (TIFF and JPEG together)."""
+    cfg = config.load()
+    for extract in extracts:
+        rotate_extract(extract, degrees, jpeg_quality=cfg.cut.jpeg_quality)
+        typer.echo(f"rotated {extract.stem} by {degrees}°")
+
+
+@app.command()
+def sync() -> None:
+    """Copy everything not yet on the NAS, verifying each file."""
+    cfg = _require_nas(config.load())
+    report = backup.sync(cfg.output_dir, cfg.nas_dir)
+    typer.echo(f"{len(report.copied)} file(s) copied, {len(report.failed)} failed")
+    if report.failed:
+        raise typer.Exit(1)
+
+
+@app.command()
+def prune(yes: Annotated[bool, typer.Option("--yes", help="Don't ask")] = False) -> None:
+    """Delete local files whose NAS copy is verified identical."""
+    cfg = _require_nas(config.load())
+    if not yes:
+        typer.confirm(f"Delete backed-up files from {cfg.output_dir}?", abort=True)
+    deleted = backup.prune(cfg.output_dir, cfg.nas_dir)
+    typer.echo(f"{len(deleted)} local file(s) deleted")
+
+
+@app.command()
+def devices() -> None:
+    """List the scanners SANE can see."""
+    cfg = config.load()
+    found = SaneScanner(device=cfg.device).devices()
+    typer.echo("\n".join(found) if found else "No scanner found. Is it plugged in and on?")
+
+
+@app.command(name="config")
+def show_config() -> None:
+    """Show the config file, creating a commented example if there is none."""
+    path = config.config_path()
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(config.EXAMPLE)
+        typer.echo(f"Created {path}; set nas_dir in it.")
+    typer.echo(f"{path}\n\n{path.read_text()}")
+
+
+def _start_backup(cfg: config.Config) -> backup.BackgroundSync | None:
+    if not cfg.nas_dir:
+        typer.echo("No nas_dir configured: files stay local (see `photoscan config`).")
+        return None
+    warned = False
+
+    def report(result) -> None:
+        nonlocal warned
+        if isinstance(result, backup.NasUnavailable):
+            if not warned:
+                typer.secho(f"\n{result}. Keep scanning; run `photoscan sync` later.", fg="yellow")
+                warned = True
+        elif isinstance(result, Exception):
+            typer.secho(f"\nBackup error: {result}", fg="red")
+        elif result.failed:
+            typer.secho(f"\n{len(result.failed)} file(s) failed to reach the NAS", fg="red")
+
+    return backup.BackgroundSync(cfg.output_dir, cfg.nas_dir, report)
+
+
+def _require_nas(cfg: config.Config) -> config.Config:
+    if not cfg.nas_dir:
+        typer.secho("Set nas_dir in the config first (`photoscan config`).", fg="red", err=True)
+        raise typer.Exit(1)
+    return cfg
+
+
+def _rejected_after_preview(image: np.ndarray, dpi: int, s: Session) -> bool:
+    """Open the Scan with numbered boxes in Preview.app; ask whether to keep it."""
+    small = (image >> 8).astype(np.uint8) if image.dtype == np.uint16 else image
+    scale = 1200 / max(small.shape[:2])
+    small = np.ascontiguousarray(cv2.resize(small, None, fx=scale, fy=scale))
+    for i, r in enumerate(find_prints(image, dpi, min_side_cm=s.settings.min_side_cm), start=1):
+        rect = ((r.center[0] * scale, r.center[1] * scale),
+                (r.size[0] * scale, r.size[1] * scale), r.angle)  # fmt: skip
+        box = cv2.boxPoints(rect).astype(np.int32)
+        cv2.polylines(small, [box], True, (255, 40, 40), 3)
+        cv2.putText(small, str(i), tuple(box.mean(axis=0).astype(int)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 40, 40), 4)  # fmt: skip
+    path = Path(tempfile.gettempdir()) / "photoscan-preview.jpg"
+    cv2.imwrite(str(path), cv2.cvtColor(small, cv2.COLOR_RGB2BGR))
+    subprocess.run(["open", str(path)], check=False)
+    answer = typer.prompt("Enter to keep, r to discard and rescan", default="", show_default=False)
+    return answer.strip().lower() == "r"
