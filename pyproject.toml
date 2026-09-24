@@ -1,7 +1,7 @@
 [project]
 name = "photo-scanner"
 dynamic = ["version"]
-description = "Scan several family photos at once on a Canon LiDE 400 and cut each one into its own file."
+description = "Scan several family photos at once on a SANE compatible scanner and cut each one into its own file."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
