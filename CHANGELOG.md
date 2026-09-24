@@ -1,11 +1,16 @@
 # Changelog
 
-## [v2.0.0](https://github.com/RSickenberg/photo-scanner/compare/v1.0.0...v2.0.0)
+## [v2.0.1](https://github.com/RSickenberg/photo-scanner/compare/v2.0.0...v2.0.1)
+
+- fix(detect): don't join Prints when the lid shades differently than at calibration [`c920949`](https://github.com/RSickenberg/photo-scanner/commit/c9209499d1c6d5136d3acc330fa9374ced0fcb8f)
+
+## [v2.0.0](https://github.com/RSickenberg/photo-scanner/compare/v1.0.0...v2.0.0) (2026-09-24)
 
 - build(deps): bump astral-sh/setup-uv from 6 to 7 in the actions group [`#1`](https://github.com/RSickenberg/photo-scanner/pull/1)
 - feat!: organise the archive by Source, date photos, scan and read Backs [`d956717`](https://github.com/RSickenberg/photo-scanner/commit/d9567175b6701f82c838c3e1e0dae467a1a8e9d8)
 - feat(backs): scan Backs at back_dpi (300 by default) [`448cd3e`](https://github.com/RSickenberg/photo-scanner/commit/448cd3e73b15dbf2a4218d55c707e39a9ffe3c2e)
 - build(uv): bumped deps to current version [`13bc152`](https://github.com/RSickenberg/photo-scanner/commit/13bc152b93cb8b2358a695f316257236f1d5fa17)
+- chore(release): 2.0.0 [`22ed69c`](https://github.com/RSickenberg/photo-scanner/commit/22ed69c5efb15d78031b5e9a4236632e5669500b)
 - docs(pyproject): tweaked description to fit latest changes [`9128f2e`](https://github.com/RSickenberg/photo-scanner/commit/9128f2e049a4f956691e12928c6319bc93a3b7cd)
 
 ## v1.0.0 (2026-09-24)
