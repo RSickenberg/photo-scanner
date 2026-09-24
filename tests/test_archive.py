@@ -320,3 +320,59 @@ def test_backs_can_be_scanned_at_a_lower_resolution_than_fronts(archive, reader,
     assert _record(album)["scans"][0]["back_dpi"] == DPI // 2
     with Image.open(tmp_path / "archive/album/backs/album_s001_p01_back.jpg") as img:
         assert img.size[0] == pytest.approx(450 // 2, abs=6)
+
+
+def test_a_recent_calibration_is_found_for_the_same_scanner_and_dpi(archive):
+    from datetime import datetime, timedelta
+
+    first = archive.start_session(DAY)
+    first.calibrate(make_scan([]), DPI, scanner="pixma:x")
+    now = datetime.now()
+
+    recent = archive.recent_calibration("pixma:x", DPI, timedelta(hours=2), now=now)
+
+    assert recent[0] == "2026-09-24_01_cal_01"
+    assert now - recent[1] < timedelta(minutes=1)
+    assert archive.recent_calibration("pixma:x", 600, timedelta(hours=2), now=now) is None
+    assert archive.recent_calibration("other", DPI, timedelta(hours=2), now=now) is None
+    later = now + timedelta(hours=3)
+    assert archive.recent_calibration("pixma:x", DPI, timedelta(hours=2), now=later) is None
+
+
+def test_a_pruned_calibration_is_not_reused(archive, tmp_path):
+    from datetime import timedelta
+
+    archive.start_session(DAY).calibrate(make_scan([]), DPI, scanner="pixma:x")
+    (tmp_path / "archive/_calibrations/2026-09-24_01_cal_01.tif").unlink()
+
+    assert archive.recent_calibration("pixma:x", DPI, timedelta(hours=2)) is None
+
+
+def test_a_session_can_reuse_an_earlier_calibration(archive, tmp_path):
+    archive.start_session(DAY).calibrate(make_scan([], glass_dust=[(640, 1100)]), DPI)
+    session = archive.start_session(DAY)
+
+    session.use_calibration("2026-09-24_01_cal_01")
+    session.add_scan(archive.source("Album"), make_scan(TWO_PRINTS, glass_dust=[(640, 1100)]), DPI)
+
+    record = json.loads((tmp_path / "archive/_sessions/2026-09-24_02.json").read_text())
+    assert record["calibrations"] == [{"id": "2026-09-24_01_cal_01", "reused": True}]
+    (entry,) = _record(archive.source("Album"))["scans"]
+    assert entry["calibration"] == "2026-09-24_01_cal_01"
+    assert [e["dust_repaired"] for e in entry["extracts"]] == [0, 1]
+
+
+def test_recut_falls_back_to_uncalibrated_when_the_calibration_was_pruned(archive, tmp_path):
+    session = archive.start_session(DAY)
+    session.calibrate(make_scan([], glass_dust=[(640, 1100)], seed=5), DPI)
+    album = archive.source("Album")
+    result = session.add_scan(album, make_scan(TWO_PRINTS, glass_dust=[(640, 1100)]), DPI)
+    (tmp_path / "archive/_calibrations/2026-09-24_01_cal_01.tif").unlink()
+
+    recut = Archive(tmp_path).source("Album").recut(result.scan)
+
+    assert len(recut.extracts) == 2
+    (entry,) = _record(album)["scans"]
+    assert entry["calibration"] == "2026-09-24_01_cal_01"  # history kept
+    assert entry["calibration_missing"] is True
+    assert [e["dust_repaired"] for e in entry["extracts"]] == [0, 0]

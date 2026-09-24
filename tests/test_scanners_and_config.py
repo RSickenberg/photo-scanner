@@ -149,3 +149,16 @@ def test_config_toml_example_matches_what_photoscan_config_writes():
 
 def test_config_toml_example_documents_the_real_defaults():
     assert load(Path(__file__).parents[1] / "config.toml.example") == Config()
+
+
+def test_name_looks_the_scanner_up_before_any_scan():
+    run, calls = _fake_scanimage()
+    scanner = SaneScanner(run=run)
+
+    assert scanner.name == "pixma:04A91912"
+    assert not any("--output-file" in c for c in calls)
+
+
+def test_name_is_none_when_no_scanner_is_connected():
+    run, _ = _fake_scanimage(devices="")
+    assert SaneScanner(run=run).name is None

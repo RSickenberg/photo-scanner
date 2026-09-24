@@ -35,6 +35,12 @@ class SaneScanner:
 
     @property
     def name(self) -> str | None:
+        """The device, looked up (`scanimage -L`) if none is configured; None if absent."""
+        if not self._device:
+            try:
+                self._resolve_device()
+            except ScannerError:
+                return None
         return self._device
 
     def scan(self, dpi: int, *, deep: bool = False) -> np.ndarray:

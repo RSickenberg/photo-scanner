@@ -48,8 +48,10 @@ pick from.
 
 Each Session starts with a **Calibration**: empty the glass, close the lid
 (or lay the black cloth), and press Enter. `photoscan` learns what the
-background looks like and where the dust is on the glass. `s` or
-`--no-calibrate` skips it.
+background looks like and where the dust is on the glass. If a calibration
+was made less than `calibration_max_age_minutes` ago (120 by default) on the
+same scanner at the same dpi, it's reused without asking. `s` or
+`--no-calibrate` skips calibration.
 
 Lay the Prints on the glass **with a gap of about 1 cm between them** and
 about 5 mm from the glass edges, then **cover them with a black cloth or

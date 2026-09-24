@@ -2,6 +2,7 @@
 
 import subprocess
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -60,7 +61,7 @@ def session(
             syncer.request()
 
     try:
-        if calibrate:
+        if calibrate and not _reuse_calibration(archive, sitting, scanner, dpi, cfg):
             _calibrate(sitting, scanner, dpi, deep)
         while True:
             when = (
@@ -135,6 +136,10 @@ def recut(
         source, name = archive.locate(path)
         result = source.recut(name)
         typer.echo(f"{name}: {len(result.extracts)} Extract(s)")
+        if source.entry(name).get("calibration_missing"):
+            typer.secho(
+                "  its calibration was pruned: cut without it (no dust repair)", fg="yellow"
+            )
 
 
 @app.command()
@@ -264,6 +269,21 @@ def _calibrate(sitting: Session, scanner: Scanner, dpi: int, deep: bool) -> None
         cal = sitting.calibrate(image, dpi, scanner=scanner.name)
         typer.echo(f"Calibrated: noise {cal.noise:.1f}, {cal.dust_specks} speck(s) seen")
         return
+
+
+def _reuse_calibration(
+    archive: Archive, sitting: Session, scanner: Scanner, dpi: int, cfg: config.Config
+) -> bool:
+    """Reuse a calibration made recently on this scanner and dpi, if any."""
+    max_age = timedelta(minutes=cfg.calibration_max_age_minutes)
+    recent = archive.recent_calibration(scanner.name, dpi, max_age)
+    if recent is None:
+        return False
+    cal_id, made = recent
+    sitting.use_calibration(cal_id)
+    minutes = round((datetime.now() - made).total_seconds() / 60)
+    typer.echo(f"Using the calibration from {minutes} min ago (press c to redo it).")
+    return True
 
 
 def _scan(scanner: Scanner, dpi: int, deep: bool) -> np.ndarray | None:

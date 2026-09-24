@@ -17,7 +17,8 @@ class ScannerError(Exception):
 class Scanner(Protocol):
     @property
     def name(self) -> str | None:
-        """Device identifier, recorded with each Scan; None until known."""
+        """Device identifier, recorded with each Scan (and matched to reuse a
+        calibration); None if no scanner is found."""
         ...
 
     def scan(self, dpi: int, *, deep: bool = False) -> np.ndarray:

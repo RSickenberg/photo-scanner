@@ -229,3 +229,21 @@ def test_swapped_prints_of_different_sizes_are_told_apart_by_size():
 
     assert pairs == {0: 0, 1: 1}
     assert unmatched == []
+
+
+def test_shade_between_prints_does_not_join_them_when_calibrated():
+    # Real case (2026-09-24): two Prints 2.5 mm apart on the white lid, one a thick
+    # Polaroid. The lid sat differently than during calibration and shaded the gap
+    # ~7 units off the empty-glass reference, joining both Prints into one Extract.
+    # Measured there: the gap was 7.1 from the reference but only 3.3 from the
+    # Scan's own lid colour. The lid sat a little differently with Prints on the
+    # glass, so the whole lid is shaded slightly darker than at calibration.
+    empty = make_scan([], background=WHITE, seed=1)
+    prints = [FakePrint((300, 500), (450, 600)), FakePrint((780, 400), (450, 400))]
+    shaded_lid = tuple(c - 10 for c in WHITE)
+    scan = make_scan(prints, background=shaded_lid, seed=2)
+
+    regions = find_prints(scan, DPI, calibration=calibrate(empty, DPI))
+
+    assert len(regions) == 2
+    assert [round(r.size[0]) for r in regions] == pytest.approx([450, 450], abs=8)

@@ -173,3 +173,15 @@ def test_forced_prune_warns_about_files_not_on_the_nas(setup, tmp_path, monkeypa
     assert not list(local.glob("photos/*/*.jpg"))
     assert not list(local.glob("archive/*/scans/*"))
     assert (local / "archive/album/source.json").exists()  # records are kept
+
+
+def test_a_recent_calibration_is_reused_without_asking(setup):
+    local, _, scanner, _ = setup
+    run("session", "Album", input="\n\nq\n")  # estimate, calibrate, finish
+    assert scanner.calls == 1
+
+    result = run("session", "Album", input="\nq\n")  # straight to scanning
+
+    assert "Using the calibration from" in result.output
+    assert "Calibration:" not in result.output
+    assert scanner.calls == 2  # one Scan, no calibration pass

@@ -17,7 +17,7 @@ import re
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -89,12 +89,33 @@ class Archive:
         return session
 
     def calibration(self, cal_id: str | None) -> Calibration | None:
+        """A calibration by id; None if there's none, or its empty-glass Scan was pruned."""
         if cal_id is None:
             return None
         if cal_id not in self._calibrations:
-            empty, meta = read_tiff(self.archive / "_calibrations" / f"{cal_id}.tif")
+            path = self.archive / "_calibrations" / f"{cal_id}.tif"
+            if not path.exists():
+                return None
+            empty, meta = read_tiff(path)
             self._calibrations[cal_id] = detect.calibrate(empty, meta.dpi)
         return self._calibrations[cal_id]
+
+    def recent_calibration(
+        self, scanner: str | None, dpi: int, max_age: timedelta, *, now: datetime | None = None
+    ) -> tuple[str, datetime] | None:
+        """The latest calibration (id, time) made on this scanner at this dpi within
+        `max_age`, if its empty-glass Scan is still on disk (it may have been pruned)."""
+        now = now or datetime.now()
+        best: tuple[datetime, str] | None = None
+        for record in (self.archive / "_sessions").glob("*.json"):
+            for cal in json.loads(record.read_text()).get("calibrations", []):
+                if cal.get("reused") or cal["scanner"] != scanner or cal["dpi"] != dpi:
+                    continue
+                made = datetime.fromisoformat(cal["calibrated_at"])
+                usable = (self.archive / "_calibrations" / f"{cal['id']}.tif").exists()
+                if usable and now - made <= max_age and (best is None or made > best[0]):
+                    best = (made, cal["id"])
+        return (best[1], best[0]) if best else None
 
     def locate(self, path: Path) -> tuple["Source", str]:
         """The Source and Extract (or Scan) name behind a photo, master or Scan path."""
@@ -153,6 +174,14 @@ class Session:
                 "dust_specks": calibration.dust_specks,
             }
         )
+        self.calibration_id = cal_id
+        self.save()
+        return calibration
+
+    def use_calibration(self, cal_id: str) -> Calibration:
+        """Reuse an earlier Session's calibration instead of scanning the empty glass again."""
+        calibration = self.archive.calibration(cal_id)
+        self._record["calibrations"].append({"id": cal_id, "reused": True})
         self.calibration_id = cal_id
         self.save()
         return calibration
@@ -254,7 +283,7 @@ class Source:
         self, scan: str, back: np.ndarray, dpi: int, *, calibration: str | None = None
     ) -> BackResult:
         """Pair a Scan of the flipped Prints with the fronts, read their text, re-date."""
-        entry = self._scan(scan)
+        entry = self.entry(scan)
         entry["back_scan"] = f"{scan}_back"
         entry["back_calibration"] = calibration
         entry["back_dpi"] = dpi  # may be lower than the front's: only text is needed
@@ -265,7 +294,7 @@ class Source:
 
     def recut(self, scan: str) -> ScanResult:
         """Redo a Scan's Extracts (and Backs), with its own calibration and typed date."""
-        entry = self._scan(scan)
+        entry = self.entry(scan)
         self._remove_outputs(scan, keep_scans=True)
         image, _ = read_tiff(self.scan_file(scan))
         entry["extracts"] = self._cut(image, entry)
@@ -318,6 +347,8 @@ class Source:
     def _cut(self, scan: np.ndarray, entry: dict) -> list[dict]:
         s = self.archive.settings
         calibration = self.archive.calibration(entry["calibration"])
+        # Pruned calibration: fall back to uncalibrated detection, and say so.
+        entry["calibration_missing"] = bool(entry["calibration"]) and calibration is None
         items = []
         regions = find_prints(
             scan, entry["dpi"], min_side_cm=s.min_side_cm, calibration=calibration
@@ -406,7 +437,8 @@ class Source:
         for path in doomed:
             path.unlink(missing_ok=True)
 
-    def _scan(self, scan: str) -> dict:
+    def entry(self, scan: str) -> dict:
+        """The record of one Scan."""
         for entry in self.scans:
             if entry["scan"] == scan:
                 return entry

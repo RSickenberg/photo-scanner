@@ -22,6 +22,10 @@ output_dir = "~/Pictures/photoscan"
 
 dpi = 600
 back_dpi = 300       # Backs are only read for printed dates: 300 dpi takes half the time
+
+# A calibration this recent (same scanner, same dpi) is reused instead of
+# asking to scan the empty glass again. Press c in a Session to redo it.
+calibration_max_age_minutes = 120
 min_print_cm = 2.5   # shorter side; anything smaller is treated as dust
 inset_px = 2         # cut this far inside each Print's edge
 jpeg_quality = 95
@@ -42,6 +46,7 @@ class Config:
     nas_dir: Path | None = None
     dpi: int = 600
     back_dpi: int = 300
+    calibration_max_age_minutes: int = 120
     backend: str = "sane"
     device: str | None = None
     cut: CutSettings = CutSettings()
@@ -62,6 +67,9 @@ def load(path: Path | None = None) -> Config:
         nas_dir=Path(raw["nas_dir"]).expanduser() if raw.get("nas_dir") else None,
         dpi=int(raw.get("dpi", defaults.dpi)),
         back_dpi=int(raw.get("back_dpi", defaults.back_dpi)),
+        calibration_max_age_minutes=int(
+            raw.get("calibration_max_age_minutes", defaults.calibration_max_age_minutes)
+        ),
         backend=raw.get("backend", defaults.backend),
         device=raw.get("device"),
         cut=CutSettings(

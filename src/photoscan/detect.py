@@ -197,27 +197,37 @@ def _lab(img: np.ndarray) -> np.ndarray:
 def _foreground_mask(img: np.ndarray, calibration: Calibration | None) -> np.ndarray:
     """White where something differs from the glass/lid background."""
     lab = _lab(img)
-    if calibration is not None:
+    background, noise = _background(lab)
+    unlike_lid = np.linalg.norm(lab - background, axis=-1)
+    if calibration is None:
+        # Not Otsu: a high-contrast photo drags Otsu's split far above pale frames
+        # and skies, which then get cut off as if they were background.
+        mask = unlike_lid > max(_MIN_CONTRAST, _NOISE_FACTOR * noise)
+    else:
         reference = calibration.reference
         if reference.shape != lab.shape:  # calibrated at another dpi
             reference = cv2.resize(reference, lab.shape[1::-1], interpolation=cv2.INTER_AREA)
-        distance = np.linalg.norm(lab - reference, axis=-1)
-        threshold = calibration.threshold
-    else:
-        background, noise = _background(lab)
-        distance = np.linalg.norm(lab - background, axis=-1)
-        # Not Otsu: a high-contrast photo drags Otsu's split far above pale frames
-        # and skies, which then get cut off as if they were background.
-        threshold = max(_MIN_CONTRAST, _NOISE_FACTOR * noise)
-    distance = np.clip(distance, 0, 255).astype(np.uint8)
-    _, mask = cv2.threshold(distance, threshold, 255, cv2.THRESH_BINARY)
+        # A Print must differ from the empty glass AND from the Scan's own
+        # background colour. The reference alone isn't enough: Prints (thick
+        # Polaroids especially) lift the lid, which then shades the gaps between
+        # them a little differently than during calibration, enough to join two
+        # Prints 2.5 mm apart (real LiDE 400 Scan, 2026-09-24). The colour test
+        # rejects that shade; the reference test rejects edge vignetting and lint.
+        unlike_glass = np.linalg.norm(lab - reference, axis=-1) > calibration.threshold
+        mask = unlike_glass & (unlike_lid > _MIN_CONTRAST)
+    return _clean(mask.astype(np.uint8) * 255)
 
-    # Close gaps where a Print is locally close to the background colour
-    # (dark sky on a dark cloth), then drop specks and thin slivers, like the
-    # scanner's vignetting along the glass edge, that would stretch a Print's box.
-    # Outside the Scan is background, so a Print a few mm from the glass edge
-    # isn't bridged to it; OR-ing the raw mask back restores what that erodes
-    # off Prints that do touch the edge.
+
+def _clean(mask: np.ndarray) -> np.ndarray:
+    """Close gaps inside Prints, then drop specks and thin slivers.
+
+    Closing fills spots where a Print is locally close to the background (dark
+    sky on a dark cloth). Outside the Scan counts as background, so a Print a
+    few mm from the glass edge isn't bridged to it; OR-ing the raw mask back
+    restores what that erodes off Prints that do touch the edge. Opening then
+    drops specks and slivers (vignetting along the glass edge) that would
+    stretch a Print's box.
+    """
     close = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
     closed = cv2.morphologyEx(
         mask, cv2.MORPH_CLOSE, close, iterations=2, borderType=cv2.BORDER_CONSTANT, borderValue=0
