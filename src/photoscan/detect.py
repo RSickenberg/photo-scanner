@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from photoscan.imagefiles import to_8bit
+
 # Detection runs on a downscaled copy: plenty to find photo edges, much faster.
 _DETECT_LONG_SIDE = 1200
 # Colour distance (Lab) from the background above which a pixel is "not glass".
@@ -37,6 +39,8 @@ _SPLIT_WINDOW_CM = 1.0
 _CAPTION_REACH_CM = 2.5
 _CAPTION_EDGE_SEARCH_CM = 1.5
 _CAPTION_EDGE_MIN_STEP = 2.0  # Lab L units: paper vs lid, or the edge's highlight
+# How far a Print may move when flipped for its Back to still be paired.
+BACK_TOLERANCE_CM = 3.0
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,41 @@ class Region:
     center: tuple[float, float]  # (x, y)
     size: tuple[float, float]  # (width, height), as the Print is oriented on the glass
     angle: float  # degrees, as returned by cv2.minAreaRect, normalised to [-45, 45)
+
+    @classmethod
+    def around(cls, points: np.ndarray) -> "Region":
+        """The smallest box around these points (a contour, or corners), straightened.
+
+        minAreaRect may report a 3° tilt as (h, w, 93°) or (w, h, -87°): the
+        angle is folded into [-45, 45) and the sides swapped accordingly, so a
+        landscape Print stays landscape.
+        """
+        (cx, cy), (w, h), angle = cv2.minAreaRect(points)
+        while angle >= 45:
+            angle -= 90
+            w, h = h, w
+        while angle < -45:
+            angle += 90
+            w, h = h, w
+        return cls(center=(cx, cy), size=(w, h), angle=angle)
+
+    @classmethod
+    def from_list(cls, values: list[float]) -> "Region":
+        cx, cy, w, h, angle = values
+        return cls(center=(cx, cy), size=(w, h), angle=angle)
+
+    def as_list(self) -> list[float]:
+        """[cx, cy, width, height, angle], as kept in the Source's record."""
+        return [round(v, 2) for v in (*self.center, *self.size, self.angle)]
+
+    def box(self) -> np.ndarray:
+        """The four corners (float32), in the same pixels as the Region."""
+        return cv2.boxPoints((self.center, self.size, self.angle)).astype(np.float32)
+
+    def scaled(self, factor: float) -> "Region":
+        """The same Region in pixels `factor` times bigger (e.g. another dpi)."""
+        (cx, cy), (w, h) = self.center, self.size
+        return Region((cx * factor, cy * factor), (w * factor, h * factor), self.angle)
 
 
 @dataclass(frozen=True, eq=False)
@@ -67,7 +106,7 @@ class Calibration:
 
 def calibrate(empty: np.ndarray, dpi: int) -> Calibration:
     """Learn the background and the glass dust from a Scan of the empty glass."""
-    empty8 = _to_8bit(empty)
+    empty8 = to_8bit(empty)
     reference = _lab(_downscale(empty8)[0])
     # Noise = what's left once slow shading (vignetting, lid gradient) is removed.
     # Comparing two Scans adds two such noises, hence the sqrt(2).
@@ -94,7 +133,7 @@ def find_prints(
     calibration: Calibration | None = None,
 ) -> list[Region]:
     """Every Print on the Scan, in reading order (top-to-bottom, then left-to-right)."""
-    small, scale = _downscale(_to_8bit(scan))
+    small, scale = _downscale(to_8bit(scan))
     raw = _raw_mask(small, calibration)
     mask = _clean(raw)
 
@@ -103,13 +142,11 @@ def find_prints(
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     regions, bodies, fragments = [], [], []
     for contour in contours:
-        (cx, cy), (w, h), angle = cv2.minAreaRect(contour)
-        if min(w, h) < min_side_px:
+        if min(cv2.minAreaRect(contour)[1]) < min_side_px:
             fragments.append(contour)
             continue
         for body in _split_at_gaps(contour, mask, raw, min_side_px, px_per_cm):
-            (cx, cy), (w, h), angle = cv2.minAreaRect(body)
-            regions.append(_normalise(cx, cy, w, h, angle))
+            regions.append(Region.around(body))
             bodies.append(body)
 
     # Each fragment (e.g. caption text) belongs to the nearest Print only.
@@ -125,7 +162,7 @@ def find_prints(
         others = np.zeros_like(mask)
         cv2.drawContours(others, [b for j, b in enumerate(bodies) if j != i], -1, 255, cv2.FILLED)
         grown.append(_attach_caption(region, owned[i], others, lightness, px_per_cm))
-    return _reading_order([_scaled(r, 1 / scale) for r in grown])
+    return _reading_order([r.scaled(1 / scale) for r in grown])
 
 
 def cut(scan: np.ndarray, region: Region, *, inset_px: int = 2) -> np.ndarray:
@@ -147,7 +184,7 @@ def repair_dust(
     if count == 1:
         return extract, 0
     expected = _upright(calibration.contrast, region, inset_px, cv2.INTER_LINEAR)
-    found = _speck_contrast(cv2.cvtColor(_to_8bit(extract), cv2.COLOR_RGB2GRAY), calibration.dpi)
+    found = _speck_contrast(cv2.cvtColor(to_8bit(extract), cv2.COLOR_RGB2GRAY), calibration.dpi)
     limit = _speck_limit(found)
     shown = []
     for i in range(1, count):
@@ -167,7 +204,7 @@ def repair_dust(
 
 
 def match_backs(
-    fronts: list[Region], backs: list[Region], dpi: int, *, tolerance_cm: float = 3.0
+    fronts: list[Region], backs: list[Region], dpi: int, *, tolerance_cm: float = BACK_TOLERANCE_CM
 ) -> tuple[dict[int, int], list[int]]:
     """Pair each Back with the front it belongs to: {front index: back index}.
 
@@ -194,17 +231,13 @@ def match_backs(
 
 def distance_outside(region: Region, point: tuple[float, float]) -> float:
     """How far `point` lies outside `region` (0 when inside), in pixels."""
-    box = cv2.boxPoints((region.center, region.size, region.angle)).astype(np.float32)
-    return max(0.0, -cv2.pointPolygonTest(box, (float(point[0]), float(point[1])), True))
+    inside = cv2.pointPolygonTest(region.box(), (float(point[0]), float(point[1])), True)
+    return max(0.0, -inside)
 
 
 def enclose(regions: list[Region]) -> Region:
     """The smallest (rotated) box around all these regions."""
-    points = np.concatenate([cv2.boxPoints((r.center, r.size, r.angle)) for r in regions]).astype(
-        np.float32
-    )
-    (cx, cy), (w, h), angle = cv2.minAreaRect(points)
-    return _normalise(cx, cy, w, h, angle)
+    return Region.around(np.concatenate([r.box() for r in regions]))
 
 
 def _upright(image: np.ndarray, region: Region, inset_px: int, interpolation: int) -> np.ndarray:
@@ -241,8 +274,7 @@ def _split_at_gaps(
     Coverage is measured on the raw mask: the clean-up that fills small holes
     inside Prints would also fill a 2-3 mm gap.
     """
-    (cx, cy), (w, h), angle = cv2.minAreaRect(contour)
-    region = _normalise(cx, cy, w, h, angle)
+    region = Region.around(contour)
     shape = np.zeros_like(mask)
     cv2.drawContours(shape, [contour], -1, 255, cv2.FILLED)
     upright_shape = _upright(shape & mask, region, 0, cv2.INTER_NEAREST) > 0
@@ -333,32 +365,26 @@ def _attach_caption(
     light = _upright(lightness, grown, 0, cv2.INTER_LINEAR)
 
     # The Print occupies [pad, pad + h) x [pad, pad + w) in these upright views.
-    # Each side, as (fragment band, lightness band), both read outward from the side.
-    across, down = slice(pad, pad + w), slice(pad, pad + h)
-    sides = {
-        "top": (near[pad - reach : pad, across][::-1], blocked[:pad, across][::-1],
-                light[:pad, across][::-1]),
-        "bottom": (near[pad + h : pad + h + reach, across], blocked[pad + h :, across],
-                   light[pad + h :, across]),
-        "left": (near[down, pad - reach : pad][:, ::-1].T, blocked[down, :pad][:, ::-1].T,
-                 light[down, :pad][:, ::-1].T),
-        "right": (near[down, pad + w : pad + w + reach].T, blocked[down, pad + w :].T,
-                  light[down, pad + w :].T),
-    }  # fmt: skip
+    # Each side is turned to the bottom (np.rot90 turns counter-clockwise: the
+    # left side comes to the bottom after one turn), then read outward from it.
     grow = {}
-    for side, (band, other_band, profile_band) in sides.items():
-        rows = np.flatnonzero(band.any(axis=1))
+    for side, turns in (("bottom", 0), ("left", 1), ("top", 2), ("right", 3)):
+        text, other, profile = (np.rot90(v, turns) for v in (near, blocked, light))
+        side_len, depth = (w, h) if turns % 2 == 0 else (h, w)
+        along = slice(pad, pad + side_len)
+        outward = slice(pad + depth, None)
+        rows = np.flatnonzero(text[outward, along][:reach].any(axis=1))
         if not len(rows):
             continue
         text_end = int(rows[-1]) + 1
         # Never reach into another Print: its edge would be the strongest "step".
-        hit = np.flatnonzero(other_band.any(axis=1))
-        limit = int(hit[0]) - 2 if len(hit) else len(profile_band)
+        hit = np.flatnonzero(other[outward, along].any(axis=1))
+        limit = int(hit[0]) - 2 if len(hit) else profile.shape[0] - pad - depth
         if limit <= text_end:
             continue
         # Start past the text: its last strokes are a much stronger "step" than the edge.
-        profile = profile_band[:limit].mean(axis=1)
-        edge = _paper_edge(profile, text_end + 4, min(search, limit - text_end - 4))
+        lightness_out = profile[outward, along][:limit].mean(axis=1)
+        edge = _paper_edge(lightness_out, text_end + 4, min(search, limit - text_end - 4))
         grow[side] = edge or text_end + 1
     if not grow:
         return region
@@ -386,15 +412,6 @@ def _paper_edge(profile: np.ndarray, start: int, search: int) -> int | None:
     return where if best >= _CAPTION_EDGE_MIN_STEP else None
 
 
-def _scaled(region: Region, factor: float) -> Region:
-    (cx, cy), (w, h) = region.center, region.size
-    return Region((cx * factor, cy * factor), (w * factor, h * factor), region.angle)
-
-
-def _to_8bit(scan: np.ndarray) -> np.ndarray:
-    return (scan >> 8).astype(np.uint8) if scan.dtype == np.uint16 else scan
-
-
 def _downscale(img: np.ndarray) -> tuple[np.ndarray, float]:
     scale = min(1.0, _DETECT_LONG_SIDE / max(img.shape[:2]))
     if scale < 1.0:
@@ -406,11 +423,6 @@ def _lab(img: np.ndarray) -> np.ndarray:
     # Median, not Gaussian: removes noise without smearing edges outwards, which a
     # low threshold would otherwise count as part of the Print.
     return cv2.cvtColor(cv2.medianBlur(img, 5), cv2.COLOR_RGB2LAB).astype(np.float32)
-
-
-def _foreground_mask(img: np.ndarray, calibration: Calibration | None) -> np.ndarray:
-    """White where something differs from the glass/lid background, cleaned up."""
-    return _clean(_raw_mask(img, calibration))
 
 
 def _raw_mask(img: np.ndarray, calibration: Calibration | None) -> np.ndarray:
@@ -516,22 +528,6 @@ def _find_dust(contrast: np.ndarray, dpi: int) -> tuple[np.ndarray, int]:
     # Grow each speck a little so its soft edge is repaired too.
     grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * (1 + dpi // 300) + 1,) * 2)
     return cv2.dilate(dust, grow).astype(bool), len(keep)
-
-
-def _normalise(cx: float, cy: float, w: float, h: float, angle: float) -> Region:
-    """Pick the smallest rotation that straightens the Print.
-
-    minAreaRect may report a 3° tilt as (h, w, 93°) or (w, h, -87°): fold the
-    angle into [-45, 45) and swap sides accordingly, so a landscape Print stays
-    landscape.
-    """
-    while angle >= 45:
-        angle -= 90
-        w, h = h, w
-    while angle < -45:
-        angle += 90
-        w, h = h, w
-    return Region(center=(cx, cy), size=(w, h), angle=angle)
 
 
 def _reading_order(regions: list[Region]) -> list[Region]:

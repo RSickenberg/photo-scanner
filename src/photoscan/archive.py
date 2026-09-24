@@ -25,6 +25,7 @@ import numpy as np
 from photoscan import detect
 from photoscan.dates import PhotoDate, choose_date
 from photoscan.detect import (
+    BACK_TOLERANCE_CM,
     Calibration,
     Region,
     cut,
@@ -37,8 +38,6 @@ from photoscan.detect import (
 from photoscan.imagefiles import Meta, read_jpeg, read_tiff, write_jpeg, write_tiff
 
 Reader = Callable[[np.ndarray], list[str]]
-# How far a Print may move when flipped for its Back to still be paired.
-BACK_TOLERANCE_CM = 3.0
 
 
 @dataclass(frozen=True)
@@ -384,7 +383,7 @@ class Source:
                 image, dust = repair_dust(image, calibration, region, inset_px=s.inset_px)
             item = {
                 "name": f"{entry['scan']}_p{i:02d}",
-                "region": [round(v, 2) for v in (*region.center, *region.size, region.angle)],
+                "region": region.as_list(),
                 "typed_date": entry["typed_date"],
                 "date": None,
                 "date_source": None,
@@ -407,7 +406,7 @@ class Source:
         found = find_prints(back, dpi, min_side_cm=s.min_side_cm, calibration=calibration)
         # Fronts' regions are in the front Scan's pixels; bring them to the Back's.
         scale = dpi / entry["dpi"]
-        fronts = [_region(item["region"], scale) for item in entry["extracts"]]
+        fronts = [Region.from_list(item["region"]).scaled(scale) for item in entry["extracts"]]
         pairs, unmatched = match_backs(fronts, found, dpi)
         # A pale Back on a pale lid can come out as several pieces, none the size
         # of its front (real white Kodak back, 2026-09-24). Pieces lying where an
@@ -493,11 +492,6 @@ class Source:
         names += [p.stem for p in (self.path / "scans").glob("*.tif")]
         numbers = [int(m[1]) for n in names if (m := re.search(r"_s(\d{3,})$", n))]
         return max(numbers, default=0) + 1
-
-
-def _region(values: list[float], scale: float = 1.0) -> Region:
-    cx, cy, w, h, angle = values
-    return Region(center=(cx * scale, cy * scale), size=(w * scale, h * scale), angle=angle)
 
 
 def _now() -> str:

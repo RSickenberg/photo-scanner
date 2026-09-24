@@ -9,6 +9,8 @@ Vision isn't available (e.g. Linux CI).
 import cv2
 import numpy as np
 
+from photoscan.imagefiles import to_8bit
+
 LANGUAGES = ["fr-FR", "en-US", "de-DE"]
 # Vision scores lines coarsely (0.3 / 0.5 / 1.0). On a real card it read
 # "18.05.98" at 1.0 but also misread it as "18.05.38" at 0.5: a wrong date is
@@ -31,8 +33,7 @@ def read_text(image: np.ndarray) -> list[str]:
     Back can lie any way round on the glass)."""
     if Vision is None:
         return []
-    if image.dtype == np.uint16:
-        image = (image >> 8).astype(np.uint8)
+    image = to_8bit(image)
     lines: list[str] = []
     for turns in range(4):
         for line in confident(_recognise(np.rot90(image, turns))):

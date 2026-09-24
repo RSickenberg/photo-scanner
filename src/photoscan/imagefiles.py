@@ -79,10 +79,14 @@ def write_tiff(path: Path, image: np.ndarray, meta: Meta) -> None:
     )
 
 
+def to_8bit(image: np.ndarray) -> np.ndarray:
+    """16-bit Scans (--16bit) as 8 bits per channel; 8-bit images unchanged."""
+    return (image >> 8).astype(np.uint8) if image.dtype == np.uint16 else image
+
+
 def write_jpeg(path: Path, image: np.ndarray, meta: Meta, *, quality: int = 95) -> None:
     """Sharing copy: always 8-bit, full chroma resolution."""
-    if image.dtype == np.uint16:
-        image = (image >> 8).astype(np.uint8)
+    image = to_8bit(image)
     exif = Image.Exif()
     exif[_EXIF_DESCRIPTION] = _ascii(meta.description)
     exif[_EXIF_DATETIME] = meta.scanned.strftime("%Y:%m:%d %H:%M:%S")
