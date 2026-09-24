@@ -170,11 +170,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "numpy", specifier = ">=2.1" },
-    { name = "opencv-python-headless", specifier = ">=4.10" },
-    { name = "pillow", specifier = ">=11.0" },
-    { name = "tifffile", specifier = ">=2024.8" },
-    { name = "typer", specifier = ">=0.12" },
+    { name = "numpy", specifier = ">=2.5.3" },
+    { name = "opencv-python-headless", specifier = ">=5.0.0.93" },
+    { name = "pillow", specifier = ">=12.3.0" },
+    { name = "tifffile", specifier = ">=2026.9.20" },
+    { name = "typer", specifier = ">=0.27.2" },
 ]
 
 [package.metadata.requires-dev]
