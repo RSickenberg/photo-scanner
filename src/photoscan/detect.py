@@ -27,6 +27,11 @@ _DUST_MIN_CONTRAST = 12.0
 # (correlation of speck contrast). Measured on a real lid: lint projected onto
 # real Polaroids scored p99 0.48, and only 1 of 498 exceeded 0.6.
 _DUST_MIN_MATCH = 0.6
+# Prints joined across a partly bridged gap are split where lines across the
+# shape are at most this covered, relative to the best-covered line within
+# _SPLIT_WINDOW_CM on either side. (Real gap: ~15% covered; Prints: ~100%.)
+_SPLIT_MAX_COVERAGE = 0.5
+_SPLIT_WINDOW_CM = 1.0
 # Printed captions: text fragments this close to a Print's side (cm) extend
 # that side over them, then up to the paper's edge if one is found just beyond.
 _CAPTION_REACH_CM = 2.5
@@ -90,18 +95,22 @@ def find_prints(
 ) -> list[Region]:
     """Every Print on the Scan, in reading order (top-to-bottom, then left-to-right)."""
     small, scale = _downscale(_to_8bit(scan))
-    mask = _foreground_mask(small, calibration)
+    raw = _raw_mask(small, calibration)
+    mask = _clean(raw)
 
     min_side_px = min_side_cm / 2.54 * dpi * scale
+    px_per_cm = dpi * scale / 2.54
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     regions, bodies, fragments = [], [], []
     for contour in contours:
         (cx, cy), (w, h), angle = cv2.minAreaRect(contour)
         if min(w, h) < min_side_px:
             fragments.append(contour)
-        else:
+            continue
+        for body in _split_at_gaps(contour, mask, raw, min_side_px, px_per_cm):
+            (cx, cy), (w, h), angle = cv2.minAreaRect(body)
             regions.append(_normalise(cx, cy, w, h, angle))
-            bodies.append(contour)
+            bodies.append(body)
 
     # Each fragment (e.g. caption text) belongs to the nearest Print only.
     owned = [np.zeros_like(mask) for _ in regions]
@@ -110,7 +119,6 @@ def find_prints(
         if regions:
             nearest = min(range(len(regions)), key=lambda i: distance_outside(regions[i], (fx, fy)))
             cv2.drawContours(owned[nearest], [fragment], -1, 255, cv2.FILLED)
-    px_per_cm = dpi * scale / 2.54
     lightness = _lab(small)[..., 0]
     grown = []
     for i, region in enumerate(regions):
@@ -200,17 +208,102 @@ def enclose(regions: list[Region]) -> Region:
 
 
 def _upright(image: np.ndarray, region: Region, inset_px: int, interpolation: int) -> np.ndarray:
-    (cx, cy), (w, h) = region.center, region.size
-    rotation = cv2.getRotationMatrix2D((cx, cy), region.angle, 1.0)
-    # Shift so the Print lands centred in an output of exactly its own size.
-    rotation[0, 2] += w / 2 - cx
-    rotation[1, 2] += h / 2 - cy
+    (w, h) = region.size
+    # Rotated, and shifted so the Print lands centred in an output of exactly its own size.
     upright = cv2.warpAffine(
-        image, rotation, (round(w), round(h)), flags=interpolation, borderMode=cv2.BORDER_REPLICATE
+        image,
+        _upright_matrix(region),
+        (round(w), round(h)),
+        flags=interpolation,
+        borderMode=cv2.BORDER_REPLICATE,
     )
     if inset_px:
         upright = upright[inset_px:-inset_px, inset_px:-inset_px]
     return upright
+
+
+def _split_at_gaps(
+    contour: np.ndarray,
+    mask: np.ndarray,
+    raw: np.ndarray,
+    min_side_px: float,
+    px_per_cm: float,
+    depth: int = 0,
+) -> list[np.ndarray]:
+    """Split a shape made of several Prints whose narrow gap was partly bridged.
+
+    Two Prints 2-3 mm apart can be joined by a shadow along part of the gap (a
+    thick Polaroid next to a photo, on a real Scan). The bridge is short but
+    wide, so shrinking the shape doesn't cut it; but the gap stays a straight
+    line across the shape that's mostly lid. Inside a Print, lines across are
+    covered all along. So: a narrow valley in line coverage, between two
+    Print-sized parts, is a gap; cut there, and try again on each part.
+    Coverage is measured on the raw mask: the clean-up that fills small holes
+    inside Prints would also fill a 2-3 mm gap.
+    """
+    (cx, cy), (w, h), angle = cv2.minAreaRect(contour)
+    region = _normalise(cx, cy, w, h, angle)
+    shape = np.zeros_like(mask)
+    cv2.drawContours(shape, [contour], -1, 255, cv2.FILLED)
+    upright_shape = _upright(shape & mask, region, 0, cv2.INTER_NEAREST) > 0
+    upright = _upright(shape & raw, region, 0, cv2.INTER_NEAREST) > 0
+    matrix = _upright_matrix(region)
+    window = max(3, round(_SPLIT_WINDOW_CM * px_per_cm))
+    for axis in (0, 1):  # a cut along columns, then along rows
+        coverage = upright.mean(axis=axis)
+        gap = _gap_in(coverage, round(min_side_px), window)
+        if gap is None:
+            continue
+        cut, resume = gap
+        # The parts keep the cleaned shape: only the cut line comes from the raw mask.
+        whole = upright_shape
+        # The gap itself (bridge included) goes to neither part.
+        halves = (whole[:, :cut], whole[:, resume:]) if axis == 0 else (whole[:cut], whole[resume:])
+        offsets = ((0, 0), (resume, 0)) if axis == 0 else ((0, 0), (0, resume))
+        parts = []
+        for half, (dx, dy) in zip(halves, offsets, strict=True):
+            placed = np.zeros_like(whole, dtype=np.uint8)
+            placed[dy : dy + half.shape[0], dx : dx + half.shape[1]] = half * 255
+            back = cv2.warpAffine(
+                placed, cv2.invertAffineTransform(matrix), mask.shape[1::-1],
+                flags=cv2.INTER_NEAREST,
+            )  # fmt: skip
+            outlines, _ = cv2.findContours(back, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not outlines:
+                return [contour]
+            part = max(outlines, key=cv2.contourArea)
+            if depth < 3:
+                parts += _split_at_gaps(part, back, raw, min_side_px, px_per_cm, depth + 1)
+            else:
+                parts.append(part)
+        return parts
+    return [contour]
+
+
+def _gap_in(coverage: np.ndarray, min_part: int, window: int) -> tuple[int, int] | None:
+    """The deepest narrow dip in coverage leaving at least `min_part` on each side,
+    as the span [start, end) of lines that belong to the gap."""
+    best, where, limit = 1.0, None, 0.0
+    for i in range(min_part, len(coverage) - min_part):
+        around = min(coverage[max(0, i - window) : i].max(), coverage[i + 1 : i + 1 + window].max())
+        if coverage[i] < _SPLIT_MAX_COVERAGE * around and coverage[i] < best:
+            best, where, limit = coverage[i], i, _SPLIT_MAX_COVERAGE * around
+    if where is None:
+        return None
+    start, end = where, where + 1
+    while start > 0 and coverage[start - 1] < limit:
+        start -= 1
+    while end < len(coverage) and coverage[end] < limit:
+        end += 1
+    return start, end
+
+
+def _upright_matrix(region: Region) -> np.ndarray:
+    (cx, cy), (w, h) = region.center, region.size
+    matrix = cv2.getRotationMatrix2D((cx, cy), region.angle, 1.0)
+    matrix[0, 2] += w / 2 - cx
+    matrix[1, 2] += h / 2 - cy
+    return matrix
 
 
 def _attach_caption(
@@ -316,7 +409,12 @@ def _lab(img: np.ndarray) -> np.ndarray:
 
 
 def _foreground_mask(img: np.ndarray, calibration: Calibration | None) -> np.ndarray:
-    """White where something differs from the glass/lid background."""
+    """White where something differs from the glass/lid background, cleaned up."""
+    return _clean(_raw_mask(img, calibration))
+
+
+def _raw_mask(img: np.ndarray, calibration: Calibration | None) -> np.ndarray:
+    """White where something differs from the glass/lid background, pixel by pixel."""
     lab = _lab(img)
     background, noise = _background(lab)
     unlike_lid = np.linalg.norm(lab - background, axis=-1)
@@ -336,7 +434,7 @@ def _foreground_mask(img: np.ndarray, calibration: Calibration | None) -> np.nda
         # rejects that shade; the reference test rejects edge vignetting and lint.
         unlike_glass = np.linalg.norm(lab - reference, axis=-1) > calibration.threshold
         mask = unlike_glass & (unlike_lid > _MIN_CONTRAST)
-    return _clean(mask.astype(np.uint8) * 255)
+    return mask.astype(np.uint8) * 255
 
 
 def _clean(mask: np.ndarray) -> np.ndarray:

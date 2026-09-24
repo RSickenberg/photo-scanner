@@ -287,3 +287,23 @@ def test_a_caption_between_two_prints_belongs_to_the_nearest_only():
     assert upper.size[1] == pytest.approx(840, abs=10)  # caption included, no more
     assert lower.size[1] == pytest.approx(400, abs=8)  # not extended over the caption
     assert upper.center[1] + upper.size[1] / 2 < lower.center[1] - lower.size[1] / 2
+
+
+@pytest.mark.parametrize("calibrated", [False, True])
+def test_prints_joined_by_a_shadow_in_a_narrow_gap_are_split(calibrated):
+    # Real case (2026-09-24): a photo and a thick Polaroid 2.5 mm apart on the
+    # white lid; along part of the gap a shadow read as "not lid", bridging them
+    # into one shape that came out as a single Extract.
+    left, right = FakePrint((300, 500), (500, 700)), FakePrint((690, 560), (250, 500))
+    empty = make_scan([], background=WHITE, seed=1)
+    scan = make_scan([left, right], background=WHITE, seed=2)
+    scan[330:520, 550:566] = (200, 200, 200)  # the shadow in the 15 px gap (x 550-565)
+    calibration = calibrate(empty, DPI) if calibrated else None
+
+    regions = find_prints(scan, DPI, calibration=calibration)
+
+    assert len(regions) == 2
+    assert [tuple(round(s) for s in r.size) for r in regions] == [
+        pytest.approx((500, 700), abs=8),
+        pytest.approx((250, 500), abs=8),
+    ]

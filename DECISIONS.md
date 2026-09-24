@@ -92,3 +92,11 @@ to be tracked. Never delete an entry; supersede or reopen it instead.
 - **Premises:** captions carry text. A plain white margin without text on the white lid is still lost (black cloth avoids it).
 - **Amended (2026-09-24):** a caption between two Prints was claimed by both, and the upper Print's edge search stopped at the lower Print's top edge, so the Extracts overlapped. Each text fragment now belongs to the nearest Print only, and the search for a paper edge stops before any other Print. Verified on that real Scan: no overlap, caption kept with its photo.
 
+## D-009 (2026-09-24) — Split Prints joined across a partly bridged gap
+
+- **Status:** decided
+- **Foundational:** no
+- **Decision:** each detected shape is checked for a gap. On the raw mask (before the clean-up that fills small holes), lines across the shape along its sides are measured for coverage. A narrow dip (≤ 50% of the best-covered line within 1 cm on either side), leaving Print-sized parts on both sides, is a gap: the shape is cut there, the gap itself going to neither part, and each part is checked again (both directions, up to 3 levels).
+- **Why:** on a real Scan, a photo and a thick Polaroid 2.5 mm apart were joined by a shadow along ~2.5 cm of their gap and came out as one Extract, with or without calibration. Shrinking the shape to break "necks" was tried and rejected: such a bridge is short but wide, so shrinking never cuts it. The gap's lines were ~15-28% covered, against ~100% inside Prints.
+- **Premises:** Prints are solid (every line across them is mostly covered). Known risk: a thin object running the full height of a photo, lid-coloured and aligned with its edge, would look like a gap and split that photo; `recut` can redo it.
+
