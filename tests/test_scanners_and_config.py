@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from photoscan.config import load
+from photoscan.config import EXAMPLE, Config, load
 from photoscan.scanners import ScannerError, create, sane
 from photoscan.scanners.sane import SaneScanner, build_command, parse_devices, parse_options
 
@@ -140,3 +140,12 @@ def test_config_reads_user_values(tmp_path):
     assert config.nas_dir == Path("/Volumes/photos")
     assert config.dpi == 300
     assert config.cut.inset_px == 4
+
+
+def test_config_toml_example_matches_what_photoscan_config_writes():
+    example = Path(__file__).parents[1] / "config.toml.example"
+    assert example.read_text() == EXAMPLE
+
+
+def test_config_toml_example_documents_the_real_defaults():
+    assert load(Path(__file__).parents[1] / "config.toml.example") == Config()

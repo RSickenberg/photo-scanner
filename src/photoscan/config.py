@@ -10,6 +10,9 @@ from photoscan.session import CutSettings
 DEFAULT_PATH = Path("~/.config/photoscan/config.toml")
 
 EXAMPLE = """\
+# photoscan config: ~/.config/photoscan/config.toml (or $PHOTOSCAN_CONFIG).
+# `photoscan config` creates it from this template (config.toml.example).
+
 # Where Sessions are written first (fast, always available).
 output_dir = "~/Pictures/photoscan"
 

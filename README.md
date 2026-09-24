@@ -16,7 +16,7 @@ Words used below (see [CONTEXT.md](CONTEXT.md)):
 ```bash
 brew install sane-backends   # scanner driver (scanimage)
 uv tool install git+https://github.com/RSickenberg/photo-scanner
-photoscan config             # creates ~/.config/photoscan/config.toml; set nas_dir there
+photoscan config             # creates ~/.config/photoscan/config.toml from config.toml.example; set nas_dir there
 photoscan devices            # should list your scanner, e.g. pixma:04A91912_…
 ```
 

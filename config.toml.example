@@ -1,0 +1,22 @@
+# photoscan config: ~/.config/photoscan/config.toml (or $PHOTOSCAN_CONFIG).
+# `photoscan config` creates it from this template (config.toml.example).
+
+# Where Sessions are written first (fast, always available).
+output_dir = "~/Pictures/photoscan"
+
+# The mounted NAS share that holds the Backup. Mount it in Finder first
+# (Go > Connect to Server, smb://...), then point this at /Volumes/<share>/...
+# nas_dir = "/Volumes/photos/family-scans"
+
+dpi = 600
+min_print_cm = 2.5   # shorter side; anything smaller is treated as dust
+inset_px = 2         # cut this far inside each Print's edge
+jpeg_quality = 95
+
+# How scanners are driven. "sane" covers every scanner SANE supports
+# (http://www.sane-project.org/sane-supported-devices.html).
+backend = "sane"
+
+# Only needed if several scanners are attached; see `photoscan devices`.
+# Without it, the first scanner found is used.
+# device = "pixma:04A91912"
