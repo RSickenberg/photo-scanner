@@ -94,18 +94,30 @@ def find_prints(
 
     min_side_px = min_side_cm / 2.54 * dpi * scale
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    regions, fragments = [], np.zeros_like(mask)
+    regions, bodies, fragments = [], [], []
     for contour in contours:
         (cx, cy), (w, h), angle = cv2.minAreaRect(contour)
         if min(w, h) < min_side_px:
-            cv2.drawContours(fragments, [contour], -1, 255, cv2.FILLED)
-            continue
-        regions.append(_normalise(cx, cy, w, h, angle))
+            fragments.append(contour)
+        else:
+            regions.append(_normalise(cx, cy, w, h, angle))
+            bodies.append(contour)
 
+    # Each fragment (e.g. caption text) belongs to the nearest Print only.
+    owned = [np.zeros_like(mask) for _ in regions]
+    for fragment in fragments:
+        (fx, fy), _, _ = cv2.minAreaRect(fragment)
+        if regions:
+            nearest = min(range(len(regions)), key=lambda i: distance_outside(regions[i], (fx, fy)))
+            cv2.drawContours(owned[nearest], [fragment], -1, 255, cv2.FILLED)
     px_per_cm = dpi * scale / 2.54
     lightness = _lab(small)[..., 0]
-    regions = [_attach_caption(r, fragments, lightness, px_per_cm) for r in regions]
-    return _reading_order([_scaled(r, 1 / scale) for r in regions])
+    grown = []
+    for i, region in enumerate(regions):
+        others = np.zeros_like(mask)
+        cv2.drawContours(others, [b for j, b in enumerate(bodies) if j != i], -1, 255, cv2.FILLED)
+        grown.append(_attach_caption(region, owned[i], others, lightness, px_per_cm))
+    return _reading_order([_scaled(r, 1 / scale) for r in grown])
 
 
 def cut(scan: np.ndarray, region: Region, *, inset_px: int = 2) -> np.ndarray:
@@ -202,7 +214,11 @@ def _upright(image: np.ndarray, region: Region, inset_px: int, interpolation: in
 
 
 def _attach_caption(
-    region: Region, fragments: np.ndarray, lightness: np.ndarray, px_per_cm: float
+    region: Region,
+    fragments: np.ndarray,
+    others: np.ndarray,
+    lightness: np.ndarray,
+    px_per_cm: float,
 ) -> Region:
     """Extend a Print over a printed caption on its own pale margin.
 
@@ -220,25 +236,36 @@ def _attach_caption(
     w, h = round(region.size[0]), round(region.size[1])
     grown = Region(region.center, (w + 2 * pad, h + 2 * pad), region.angle)
     near = _upright(fragments, grown, 0, cv2.INTER_NEAREST)
+    blocked = _upright(others, grown, 0, cv2.INTER_NEAREST)
     light = _upright(lightness, grown, 0, cv2.INTER_LINEAR)
 
     # The Print occupies [pad, pad + h) x [pad, pad + w) in these upright views.
     # Each side, as (fragment band, lightness band), both read outward from the side.
     across, down = slice(pad, pad + w), slice(pad, pad + h)
     sides = {
-        "top": (near[pad - reach : pad, across][::-1], light[:pad, across][::-1]),
-        "bottom": (near[pad + h : pad + h + reach, across], light[pad + h :, across]),
-        "left": (near[down, pad - reach : pad][:, ::-1].T, light[down, :pad][:, ::-1].T),
-        "right": (near[down, pad + w : pad + w + reach].T, light[down, pad + w :].T),
-    }
+        "top": (near[pad - reach : pad, across][::-1], blocked[:pad, across][::-1],
+                light[:pad, across][::-1]),
+        "bottom": (near[pad + h : pad + h + reach, across], blocked[pad + h :, across],
+                   light[pad + h :, across]),
+        "left": (near[down, pad - reach : pad][:, ::-1].T, blocked[down, :pad][:, ::-1].T,
+                 light[down, :pad][:, ::-1].T),
+        "right": (near[down, pad + w : pad + w + reach].T, blocked[down, pad + w :].T,
+                  light[down, pad + w :].T),
+    }  # fmt: skip
     grow = {}
-    for side, (band, profile_band) in sides.items():
+    for side, (band, other_band, profile_band) in sides.items():
         rows = np.flatnonzero(band.any(axis=1))
         if not len(rows):
             continue
         text_end = int(rows[-1]) + 1
+        # Never reach into another Print: its edge would be the strongest "step".
+        hit = np.flatnonzero(other_band.any(axis=1))
+        limit = int(hit[0]) - 2 if len(hit) else len(profile_band)
+        if limit <= text_end:
+            continue
         # Start past the text: its last strokes are a much stronger "step" than the edge.
-        edge = _paper_edge(profile_band.mean(axis=1), text_end + 4, search)
+        profile = profile_band[:limit].mean(axis=1)
+        edge = _paper_edge(profile, text_end + 4, min(search, limit - text_end - 4))
         grow[side] = edge or text_end + 1
     if not grow:
         return region

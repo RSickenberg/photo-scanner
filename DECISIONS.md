@@ -90,4 +90,5 @@ to be tracked. Never delete an entry; supersede or reopen it instead.
 - **Decision:** after detection, a side of a Print with small text fragments (too small to be Prints) within 2.5 cm is extended over them, then up to the paper's edge: the strongest highlight or lightness step, ≥ 2 units, within 1.5 cm past the text. Without text fragments, nothing is extended.
 - **Why:** a real race photo had "20KM DE LAUSANNE 2009" printed on a white strip that's only 2–5 units off the white lid, so only its letters were detected, and the strip was cut off. Extending on edges alone was rejected: the lid has straight streaks too, which would add lid margins to Extracts.
 - **Premises:** captions carry text. A plain white margin without text on the white lid is still lost (black cloth avoids it).
+- **Amended (2026-09-24):** a caption between two Prints was claimed by both, and the upper Print's edge search stopped at the lower Print's top edge, so the Extracts overlapped. Each text fragment now belongs to the nearest Print only, and the search for a paper edge stops before any other Print. Verified on that real Scan: no overlap, caption kept with its photo.
 

@@ -271,3 +271,19 @@ def test_no_caption_no_extension_even_next_to_another_print():
     prints = [FakePrint((330, 500), (450, 600)), FakePrint((830, 500), (450, 600))]
     regions = find_prints(make_scan(prints, background=WHITE), DPI)
     assert [round(r.size[0]) for r in regions] == pytest.approx([450, 450], abs=6)
+
+
+def test_a_caption_between_two_prints_belongs_to_the_nearest_only():
+    # Real case (2026-09-24): the caption strip of a race photo lay between it
+    # and the Print below. Both claimed the text, and the upper one's edge
+    # search ran into the lower Print's edge: the two Extracts overlapped.
+    prints = [
+        FakePrint((400, 480), (700, 840), caption=True),  # caption ends at y=900
+        FakePrint((400, 1155), (600, 400)),  # top edge 55 px (~0.9 cm) below, as measured
+    ]
+    regions = find_prints(make_scan(prints, background=WHITE), DPI)
+
+    upper, lower = regions
+    assert upper.size[1] == pytest.approx(840, abs=10)  # caption included, no more
+    assert lower.size[1] == pytest.approx(400, abs=8)  # not extended over the caption
+    assert upper.center[1] + upper.size[1] / 2 < lower.center[1] - lower.size[1] / 2
