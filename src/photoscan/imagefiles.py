@@ -40,6 +40,7 @@ _SOFTWARE = f"photoscan {__version__}"
 _DATE_SOURCES = {
     "typed": "typed in",
     "ocr-back": "read on the back",
+    "scan": "set for its Scan",
     "ocr-front": "read on the front",
     "source": "estimated for the Source",
 }
@@ -51,7 +52,7 @@ class Meta:
     scanned: datetime
     dpi: int
     photo_date: PhotoDate | None = None
-    date_source: str | None = None  # typed | ocr-back | ocr-front | source
+    date_source: str | None = None  # typed | ocr-back | scan | ocr-front | source
 
     @property
     def description(self) -> str:

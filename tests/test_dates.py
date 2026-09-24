@@ -112,3 +112,16 @@ def test_the_most_precise_then_earliest_date_wins():
     # The picture is taken before it's printed: Christmas 1999, printed March 2000.
     back = ["SHO 03.2000", "Film 412-788 99.12.25 No.31"]
     assert choose_date(None, back, [], None) == (PhotoDate(1999, 12, 25), "ocr-back")
+
+
+def test_a_date_set_for_the_whole_scan_ranks_below_hand_and_back_dates():
+    scan_date, estimate = PhotoDate(1985), PhotoDate(1980, decade=True)
+    hand, back, front = PhotoDate(1984), ["KODAK 18.05.98"], ["'87 6 12"]
+    assert choose_date(hand, back, front, estimate, scan_date=scan_date) == (hand, "typed")
+    assert choose_date(None, back, front, estimate, scan_date=scan_date) == (
+        PhotoDate(1998, 5, 18),
+        "ocr-back",
+    )
+    # ...but it beats text read on the front and the Source's estimate.
+    assert choose_date(None, [], front, estimate, scan_date=scan_date) == (scan_date, "scan")
+    assert choose_date(None, [], [], estimate, scan_date=scan_date) == (scan_date, "scan")

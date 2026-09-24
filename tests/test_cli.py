@@ -97,19 +97,50 @@ def test_existing_sources_are_offered_by_number(setup):
     assert [s["scan"] for s in _source_record(local, "album")["scans"]][-1] == "album_s003"
 
 
-def test_d_sets_a_date_and_o_switches_source_mid_session(setup):
+def test_d_dates_the_latest_scan_only_and_is_not_carried_over(setup):
     local, _, _, _ = setup
 
     run(
         "session", "Album", "--no-calibrate",
-        # estimate, (1st call is empty glass), d 1984, scan, o -> new Box (no estimate), scan
-        input="\n\nd\n1984\n\no\nBox\n\n\nq\n",
+        # estimate, s001 (the fake's empty glass), s002, d 1984 (for s002), s003,
+        # o -> new Box (no estimate), Box's s001
+        input="\n\n\nd\n1984\n\no\nBox\n\n\nq\n",
     )  # fmt: skip
 
-    album = _source_record(local, "album")["scans"]
-    assert [e["date"] for s in album for e in s["extracts"]] == ["1984", "1984"]
+    album = {s["scan"]: [e["date"] for e in s["extracts"]] for s in
+             _source_record(local, "album")["scans"]}  # fmt: skip
+    assert album == {"album_s001": [], "album_s002": ["1984", "1984"], "album_s003": [None, None]}
     box = _source_record(local, "box")["scans"]
     assert [e["date"] for s in box for e in s["extracts"]] == [None, None]
+
+
+def test_d_at_the_start_of_a_session_dates_the_previous_sessions_last_scan(setup):
+    local, _, _, _ = setup
+    run("session", "Album", "--no-calibrate", input="\n\n\nq\n")  # s001 (empty), s002
+
+    result = run("session", "Album", "--no-calibrate", input="d\n~1990\nq\n")
+
+    assert "album_s002" in result.output
+    items = _source_record(local, "album")["scans"][-1]["extracts"]
+    assert {(e["date"], e["date_source"]) for e in items} == {("ca. 1990", "scan")}
+
+
+def test_d_says_which_extracts_keep_their_own_date(setup):
+    local, _, _, reader = setup
+    run("session", "Album", "--no-calibrate", input="\n\n\nq\n")  # s001 (empty), s002
+    reader.text = ["KODAK 12.08.79"]
+    run("session", "Album", "--no-calibrate", input="\nb\n\nq\n")  # s003, dated by its Backs
+
+    result = run("session", "Album", "--no-calibrate", input="d\n1985\nq\n")
+
+    assert "2 kept their own date" in result.output
+    items = _source_record(local, "album")["scans"][-1]["extracts"]
+    assert {e["date"] for e in items} == {"1979-08-12"}
+
+
+def test_d_before_any_scan_in_a_new_source(setup):
+    result = run("session", "Empty", "--no-calibrate", input="\nd\nq\n")
+    assert "No Scan in 'Empty' yet" in result.output
 
 
 def test_back_pass_reads_the_lab_stamp(setup):

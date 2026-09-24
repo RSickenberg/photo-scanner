@@ -441,3 +441,50 @@ def test_finding_an_unknown_source_creates_nothing(archive, tmp_path):
     assert archive.find_source("Album").name == "Album"
     assert archive.find_source("Typo") is None
     assert not (tmp_path / "archive/typo").exists()
+
+
+def test_dating_a_scan_skips_extracts_dated_by_their_back_or_by_hand(archive, reader):
+    session, album = archive.start_session(DAY), archive.source("Album")
+    three = [
+        FakePrint((300, 300), (450, 300)),
+        FakePrint((900, 300), (450, 300)),
+        FakePrint((600, 1200), (300, 450)),
+    ]
+    reader.text = ["Je suis née 18.05.98 à"]  # a date read on every front
+    scan = session.add_scan(album, make_scan(three), DPI).scan
+    first, second, third = (e["name"] for e in _record(album)["scans"][0]["extracts"])
+    album.set_date(third, PhotoDate(1966))  # set by hand
+    backs = iter([["KODAK 12.08.79"]])  # only the first Back has a printed date
+    archive.reader = lambda image: next(backs, [])
+    session.add_back(album, scan, make_scan(three, seed=9), DPI)
+
+    kept = album.set_scan_date(scan, PhotoDate(1985, approximate=True))
+
+    items = _record(album)["scans"][0]["extracts"]
+    assert [(e["date"], e["date_source"]) for e in items] == [
+        ("1979-08-12", "ocr-back"),  # dated by its Back: kept
+        ("ca. 1985", "scan"),  # only a date read on the front: overridden
+        ("1966", "typed"),  # dated by hand: kept
+    ]
+    assert kept == [first, third]
+
+
+def test_a_back_read_after_dating_the_scan_still_wins(archive, reader):
+    session, album = archive.start_session(DAY), archive.source("Album")
+    scan = session.add_scan(album, make_scan(TWO_PRINTS), DPI).scan
+    album.set_scan_date(scan, PhotoDate(1985))
+
+    reader.text = ["KODAK 12.08.79"]
+    session.add_back(album, scan, make_scan(TWO_PRINTS, seed=9), DPI)
+
+    items = _record(album)["scans"][0]["extracts"]
+    assert {(e["date"], e["date_source"]) for e in items} == {("1979-08-12", "ocr-back")}
+
+
+def test_the_latest_scan_of_a_source_even_from_an_earlier_session(archive):
+    album = archive.source("Album")
+    assert album.latest_scan() is None
+    archive.start_session(DAY).add_scan(album, make_scan(TWO_PRINTS), DPI)
+    archive.start_session(DAY).add_scan(album, make_scan(TWO_PRINTS), DPI)
+
+    assert archive.source("Album").latest_scan() == "album_s002"

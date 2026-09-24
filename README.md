@@ -62,7 +62,7 @@ is filed under, e.g. `[Album Grand-mère · est. 1970s]`:
 |---|---|
 | Enter | Scan the Prints on the glass |
 | `b` | Scan the **Backs** (at `back_dpi`, 300 by default: half the time of 600, enough for printed dates): flip every Print in place, then Enter. Each Back is paired with its front even if it moved a little; one that can't be paired is kept and reported |
-| `d` | Set the Photo date for the next Scans (`1985-06-15`, `1985-06`, `1985`, `1980s`, `~1985`; empty goes back to the Source's) |
+| `d` | Date the **latest Scan** of the current Source, even one from an earlier Session (`1985-06-15`, `1985-06`, `1985`, `1980s`, `~1985`; empty clears it). Extracts already dated by hand or by their Back keep their date. It isn't carried over: each Scan starts undated |
 | `o` | Switch to another Source, or create one |
 | `c` | Recalibrate, e.g. after switching between lid and cloth or cleaning the glass |
 | `q` | Finish |
@@ -101,14 +101,15 @@ makes the NAS Backup copy it again.
 Ugreen Photos places photos by EXIF `DateTimeOriginal`, so that's where the
 Photo date goes, not the scan date. It's chosen in this order:
 
-1. a date you typed (`d` in the loop, or `photoscan date` later);
+1. a date set by hand for that Extract (`photoscan date`);
 2. a date printed on the Back (lab stamps, e.g. `13.07.2009`, `99.12.25`,
    `03.2000`), read by Apple Vision on the Mac. Only text Vision is confident
    about is used, and when several dates are found, the most precise wins,
    then the earliest (a picture is taken before it's printed);
-3. a date printed on the front (camera imprints, printed cards);
-4. the Source's rough date;
-5. otherwise unknown: no date is invented, and Ugreen falls back to the
+3. a date set for its whole Scan (`d` in a Session);
+4. a date printed on the front (camera imprints, printed cards);
+5. the Source's rough date;
+6. otherwise unknown: no date is invented, and Ugreen falls back to the
    file's date.
 
 Approximate dates are written as the first day of their period (`1980s` is

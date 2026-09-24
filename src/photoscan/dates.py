@@ -138,20 +138,34 @@ def choose_date(
     back_text: list[str],
     front_text: list[str],
     estimate: PhotoDate | None,
+    *,
+    scan_date: PhotoDate | None = None,
 ) -> tuple[PhotoDate | None, str | None]:
     """The Photo date to use, and where it came from, most trusted first.
 
-    A date typed in wins; then one read on the Back (lab stamps are dates by
-    design), then on the front (camera imprints, but also any text in the
-    picture); then the Source's estimate. Otherwise unknown: nothing invented.
+    1. typed in for this Extract (by hand);
+    2. read on its Back (lab stamps are dates by design);
+    3. set for its whole Scan (`d` in a Session): a guess for several Prints,
+       so it never overrides the two above;
+    4. read on its front (camera imprints, but also any text in the picture);
+    5. the Source's estimate.
+    Otherwise unknown: nothing invented.
     """
     if typed:
         return typed, "typed"
-    for texts, source in ((back_text, "ocr-back"), (front_text, "ocr-front")):
-        if found := [d for t in texts for d in find_dates(t)]:
-            # Most precise first; then the earliest, since a picture is taken
-            # before it's printed (e.g. taken 1999-12-25, printed 03.2000).
-            return min(found, key=lambda d: (_PRECISION_RANK[d.precision], d.first_day())), source
+    if back := _best(back_text):
+        return back, "ocr-back"
+    if scan_date:
+        return scan_date, "scan"
+    if front := _best(front_text):
+        return front, "ocr-front"
     if estimate:
         return estimate, "source"
     return None, None
+
+
+def _best(texts: list[str]) -> PhotoDate | None:
+    """The date to trust among those read: the most precise, then the earliest,
+    since a picture is taken before it's printed (taken 1999-12-25, printed 03.2000)."""
+    found = [d for t in texts for d in find_dates(t)]
+    return min(found, key=lambda d: (_PRECISION_RANK[d.precision], d.first_day()), default=None)

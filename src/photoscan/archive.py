@@ -353,6 +353,21 @@ class Source:
         self._stamp(scan, item)
         self.save()
 
+    def latest_scan(self) -> str | None:
+        """The Source's most recent Scan, from any Session."""
+        return self.scans[-1]["scan"] if self.scans else None
+
+    def set_scan_date(self, scan: str, when: PhotoDate | None) -> list[str]:
+        """Date all of a Scan's Extracts at once (None clears it), except those
+        dated by hand or by their Back, which are kept. Returns the kept ones."""
+        entry = self.entry(scan)
+        entry["scan_date"] = str(when) if when else None
+        for item in entry["extracts"]:
+            self._stamp(entry, item)
+        self.save()
+        trusted = ("typed", "ocr-back")
+        return [i["name"] for i in entry["extracts"] if when and i["date_source"] in trusted]
+
     def set_estimate(self, estimate: PhotoDate | None) -> None:
         """Change the Source's estimate; Extracts that relied on it are re-stamped."""
         self._record["estimate"] = str(estimate) if estimate else None
@@ -458,7 +473,10 @@ class Source:
     def _stamp(self, entry: dict, item: dict, image: np.ndarray | None = None) -> None:
         """Resolve the Extract's Photo date and (re)write its master and photo."""
         typed = PhotoDate.parse(item["typed_date"]) if item["typed_date"] else None
-        date_, source = choose_date(typed, item["text_back"], item["text_front"], self.estimate)
+        scan_date = PhotoDate.parse(entry["scan_date"]) if entry.get("scan_date") else None
+        date_, source = choose_date(
+            typed, item["text_back"], item["text_front"], self.estimate, scan_date=scan_date
+        )
         item["date"], item["date_source"] = (str(date_) if date_ else None), source
         if image is None:
             image, _ = read_tiff(self.master(item["name"]))

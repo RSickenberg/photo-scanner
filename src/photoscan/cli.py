@@ -54,7 +54,6 @@ def session(
     sitting = archive.start_session()
     scanner = make_scanner(cfg)
     syncer = _start_backup(cfg)
-    typed: PhotoDate | None = None
     last: tuple[Source, str] | None = None  # the Scan a Back pass applies to
     total = 0
 
@@ -66,15 +65,11 @@ def session(
         if calibrate and not _reuse_calibration(archive, sitting, scanner, dpi, cfg):
             _calibrate(sitting, scanner, dpi, deep)
         while True:
-            when = (
-                str(typed)
-                if typed
-                else (f"est. {current.estimate}" if current.estimate else "date unknown")
-            )
+            when = f"est. {current.estimate}" if current.estimate else "date unknown"
             answer = (
                 typer.prompt(
-                    f"[{current.name} · {when}] Enter scan · b backs · d date · o source"
-                    " · c calibrate · q finish",
+                    f"[{current.name} · {when}] Enter scan · b backs · d date the last Scan"
+                    " · o source · c calibrate · q finish",
                     default="",
                     show_default=False,
                 )
@@ -86,18 +81,17 @@ def session(
             if answer == "c":
                 _calibrate(sitting, scanner, dpi, deep)
             elif answer == "o":
-                current, typed, last = _pick_source(archive, None), None, None
+                current, last = _pick_source(archive, None), None
             elif answer == "d":
-                typed = _ask_date(
-                    "Photo date for the next Scans (empty = back to the Source's estimate)"
-                )
+                _date_latest_scan(current)
+                backup_now()
             elif answer == "b":
                 if last is None:
                     typer.echo("Scan the fronts first; b then scans their Backs.")
                 elif _scan_backs(sitting, *last, scanner, cfg.back_dpi):
                     backup_now()
             elif answer == "" and (
-                scanned := _scan_fronts(sitting, current, scanner, dpi, deep, typed, preview)
+                scanned := _scan_fronts(sitting, current, scanner, dpi, deep, preview)
             ):
                 last = (current, scanned.scan)
                 total += len(scanned.extracts)
@@ -292,20 +286,37 @@ def _scan_fronts(
     scanner: Scanner,
     dpi: int,
     deep: bool,
-    typed: PhotoDate | None,
     preview: bool,
 ) -> ScanResult | None:
     """Scan the Prints on the glass into `source`; None if it failed or was discarded."""
     image = _scan(scanner, dpi, deep)
     if image is None:
         return None
-    result = sitting.add_scan(source, image, dpi, scanner=scanner.name, typed=typed)
+    result = sitting.add_scan(source, image, dpi, scanner=scanner.name)
     typer.echo(f"{result.scan}: {len(result.extracts)} Extract(s)")
     if preview and _rejected_after_preview(image, source, result.scan):
         source.discard(result.scan)
         typer.echo("Discarded; rearrange the Prints and scan again.")
         return None
     return result
+
+
+def _date_latest_scan(source: Source) -> None:
+    """Date the Source's latest Scan (possibly from an earlier Session), keeping
+    the Extracts already dated by hand or by their Back."""
+    scan = source.latest_scan()
+    if scan is None:
+        typer.echo(f"No Scan in {source.name!r} yet: scan first, then d dates it.")
+        return
+    count = len(source.entry(scan)["extracts"])
+    when = _ask_date(f"Photo date for {scan} ({count} Print(s); {DATE_HELP}; empty = clear)")
+    kept = source.set_scan_date(scan, when)
+    dated = count - len(kept) if when else 0
+    note = f"; {len(kept)} kept their own date (by hand or from the Back)" if kept else ""
+    if when:
+        typer.echo(f"{scan}: {dated} Extract(s) dated {when}{note}")
+    else:
+        typer.echo(f"{scan}: date for the Scan cleared")
 
 
 def _scan_backs(sitting: Session, source: Source, scan: str, scanner: Scanner, dpi: int) -> bool:
