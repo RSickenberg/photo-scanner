@@ -41,6 +41,10 @@ _CAPTION_EDGE_SEARCH_CM = 1.5
 _CAPTION_EDGE_MIN_STEP = 2.0  # Lab L units: paper vs lid, or the edge's highlight
 # How far a Print may move when flipped for its Back to still be paired.
 BACK_TOLERANCE_CM = 3.0
+# A "Back" this similar to its front is the front itself: that Print wasn't
+# flipped. Real Backs scored -0.14 to +0.41 against their fronts; an unflipped
+# Print, 1.00.
+_SAME_PICTURE = 0.8
 
 
 @dataclass(frozen=True)
@@ -227,6 +231,20 @@ def match_backs(
             pairs[f] = b
     unmatched = [b for b in range(len(backs)) if b not in pairs.values()]
     return pairs, unmatched
+
+
+def same_picture(a: np.ndarray, b: np.ndarray) -> bool:
+    """Are these two images of the same side of a Print (at any resolution)?"""
+
+    def thumb(image: np.ndarray) -> np.ndarray:
+        gray = cv2.cvtColor(to_8bit(image), cv2.COLOR_RGB2GRAY)
+        small = cv2.resize(gray, (64, 64), interpolation=cv2.INTER_AREA)
+        return cv2.GaussianBlur(small, (3, 3), 0).astype(np.float32).ravel()
+
+    ta, tb = thumb(a), thumb(b)
+    if ta.std() == 0 or tb.std() == 0:
+        return False
+    return float(np.corrcoef(ta, tb)[0, 1]) >= _SAME_PICTURE
 
 
 def distance_outside(region: Region, point: tuple[float, float]) -> float:

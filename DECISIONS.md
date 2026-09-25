@@ -87,6 +87,8 @@ to be tracked. Never delete an entry; supersede or reopen it instead.
 
 - **Amended (2026-09-24), at the user's request:** `d` in a Session no longer sets a sticky date for the *next* Scans. It dates the current Source's *latest* Scan, even one from an earlier Session, and nothing carries over to the next Scan. A date set for a Scan ranks below a date typed by hand for an Extract and below a date read on its Back, so it never overrides them (a later Back pass still wins), and above text read on the front and the Source's estimate. Order: typed (per Extract) > ocr-back > scan > ocr-front > source.
 
+- **Amended (2026-09-25):** not every Print has to be flipped. Every front used to get a "Back" (a Print detected where it lay, or at least its footprint), so a Print left face up became its own Back, and a removed one a blank crop of lid. Now a candidate Back that's the same picture as its front (64 px thumbnails, correlation ≥ 0.8; real Backs scored −0.14 to +0.41 against their fronts, an unflipped Print 1.00) means "not flipped". A Back cut only from the footprint (nothing detected there) is kept only if text is read on it, otherwise "not on the glass". Checked on a real Back Scan: all flipped, two face up, two removed, all removed.
+
 ## D-008 (2026-09-24) — Printed captions stay with their Print
 
 - **Status:** decided

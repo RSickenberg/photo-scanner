@@ -328,6 +328,10 @@ def _scan_backs(sitting: Session, source: Source, scan: str, scanner: Scanner, d
         return False
     result = sitting.add_back(source, scan, image, dpi)
     typer.echo(f"{len(result.matched)} Back(s) matched to their fronts")
+    if result.not_flipped:
+        typer.echo(f"{len(result.not_flipped)} Print(s) weren't flipped: no Back for them")
+    if result.missing:
+        typer.echo(f"{len(result.missing)} Print(s) not on the glass (or a blank Back): no Back")
     for name in result.unmatched:
         typer.secho(f"Unmatched Back kept as {name}", fg="yellow")
     return True

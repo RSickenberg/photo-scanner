@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from photoscan.detect import calibrate, cut, find_prints, match_backs, repair_dust
+from photoscan.detect import Region, calibrate, cut, find_prints, match_backs, repair_dust
 from tests.synthetic import DARK, WHITE, FakePrint, make_scan
 
 DPI = 150
@@ -333,3 +333,16 @@ def test_prints_covering_the_glass_edges_do_not_fool_the_lid_colour():
         pytest.approx((600, 854), abs=10),
         pytest.approx((634, 854), abs=10),
     ]
+
+
+def test_same_picture_tells_an_unflipped_print_from_its_back():
+    from photoscan.detect import same_picture
+
+    front = cut(make_scan([FakePrint((600, 700), (600, 400))]), Region((600, 700), (600, 400), 0))
+    moved = front[3:-3, 3:-3].astype(int)  # a few px off, with scanner noise
+    rescanned = moved + np.random.default_rng(1).normal(0, 3, moved.shape)
+    back = np.full_like(front, 238)
+    back[180:220, 100:500] = 60  # a lab stamp
+
+    assert same_picture(front, np.clip(rescanned, 0, 255).astype(np.uint8))
+    assert not same_picture(front, back)

@@ -34,6 +34,7 @@ from photoscan.detect import (
     find_prints,
     match_backs,
     repair_dust,
+    same_picture,
 )
 from photoscan.imagefiles import Meta, read_jpeg, read_tiff, write_jpeg, write_tiff
 
@@ -60,6 +61,8 @@ class ScanResult:
 class BackResult:
     matched: dict[str, str]  # Extract name -> its Back's name
     unmatched: list[str]
+    not_flipped: list[str]  # Extracts still face up on the Back Scan
+    missing: list[str]  # Extracts with nothing where they lay: removed (or a blank Back)
 
 
 class Archive:
@@ -447,15 +450,26 @@ class Source:
                 pieces[min(gaps, key=gaps.get)].append(b)
                 unmatched.remove(b)
         meta = self._meta(entry, dpi=dpi)
-        matched = {}
+        matched, not_flipped, missing = {}, [], []
         for f, item in enumerate(entry["extracts"]):
             if f in pairs:
                 where = found[pairs[f]]
             else:
                 where = enclose([fronts[f], *(found[b] for b in pieces[f])])
             image = cut(back, where, inset_px=s.inset_px)
+            # Not every Print has to be flipped: one still face up isn't a Back...
+            unflipped = same_picture(image, read_tiff(self.master(item["name"]))[0])
+            text = [] if unflipped else self.archive.reader(image)
+            # ...and one taken off the glass leaves only lid where it lay. Nothing
+            # detected there is kept only for text read on it (a faint Back).
+            footprint_only = f not in pairs and not pieces[f]
+            if unflipped or (footprint_only and not text):
+                item["back"], item["text_back"] = None, []
+                self._stamp(entry, item)
+                (not_flipped if unflipped else missing).append(item["name"])
+                continue
             item["back"] = f"{item['name']}_back"
-            item["text_back"] = self.archive.reader(image)
+            item["text_back"] = text
             self._write_back(item["back"], image, meta)
             self._stamp(entry, item)
             matched[item["name"]] = item["back"]
@@ -464,7 +478,7 @@ class Source:
             name = f"{entry['scan']}_back_unmatched_{n:02d}"
             self._write_back(name, cut(back, found[b], inset_px=s.inset_px), meta)
             entry["unmatched_backs"].append(name)
-        return BackResult(matched, entry["unmatched_backs"])
+        return BackResult(matched, entry["unmatched_backs"], not_flipped, missing)
 
     def _write_back(self, name: str, image: np.ndarray, meta: Meta) -> None:
         # Backs are kept for what's printed on them: a JPEG is enough.

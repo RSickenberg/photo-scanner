@@ -9,7 +9,7 @@ from PIL import ExifTags, Image
 from photoscan.archive import Archive
 from photoscan.dates import PhotoDate
 from photoscan.imagefiles import read_meta
-from tests.synthetic import FakePrint, make_scan
+from tests.synthetic import WHITE, FakePrint, make_scan
 
 DPI = 150
 DAY = date(2026, 9, 24)
@@ -488,3 +488,65 @@ def test_the_latest_scan_of_a_source_even_from_an_earlier_session(archive):
     archive.start_session(DAY).add_scan(album, make_scan(TWO_PRINTS), DPI)
 
     assert archive.source("Album").latest_scan() == "album_s002"
+
+
+def test_prints_that_were_not_flipped_get_no_back(archive, reader, tmp_path):
+    # Real case (2026-09-25): only one of four Prints flipped, yet four "Backs"
+    # were paired: the three unflipped fronts were taken as their own Backs.
+    import cv2
+
+    session, album = archive.start_session(DAY), archive.source("Album")
+    three = [
+        FakePrint((300, 300), (450, 300)),
+        FakePrint((900, 300), (450, 300)),
+        FakePrint((600, 1200), (300, 450)),
+    ]
+    front_scan = make_scan(three)
+    scan = session.add_scan(album, front_scan, DPI).scan
+    # Only the middle Print is flipped: plain paper with a lab stamp where it lay.
+    back_scan = front_scan.copy()
+    back_scan[150:450, 675:1125] = (238, 236, 230)
+    stamp = ("KODAK 12.08.79", (700, 300), cv2.FONT_HERSHEY_SIMPLEX, 1, (60, 60, 60), 2)
+    cv2.putText(back_scan, *stamp)
+    reader.text = ["KODAK 12.08.79"]
+
+    back = session.add_back(album, scan, back_scan, DPI)
+
+    assert back.matched == {"album_s001_p02": "album_s001_p02_back"}
+    assert back.not_flipped == ["album_s001_p01", "album_s001_p03"]
+    assert sorted(p.name for p in (tmp_path / "archive/album/backs").iterdir()) == [
+        "album_s001_p02_back.jpg"
+    ]
+    items = _record(album)["scans"][0]["extracts"]
+    assert [(e["back"], e["date_source"]) for e in items] == [
+        (None, None),
+        ("album_s001_p02_back", "ocr-back"),
+        (None, None),
+    ]
+
+
+def test_prints_removed_from_the_glass_get_no_blank_back(archive, tmp_path):
+    import cv2
+
+    session, album = archive.start_session(DAY), archive.source("Album")
+    three = [
+        FakePrint((300, 300), (450, 300)),
+        FakePrint((900, 300), (450, 300)),
+        FakePrint((600, 1200), (300, 450)),
+    ]
+    scan = session.add_scan(album, make_scan(three), DPI).scan
+    # Only the middle Print is left on the glass, flipped; the others were removed.
+    back_scan = make_scan([FakePrint((900, 300), (450, 300))], background=WHITE, seed=9)
+    back_scan[150:450, 675:1125] = (238, 236, 230)
+    stamp = ("KODAK 12.08.79", (700, 300), cv2.FONT_HERSHEY_SIMPLEX, 1, (60, 60, 60), 2)
+    cv2.putText(back_scan, *stamp)
+    # Text only where something is printed (the stamp), none on the empty white lid.
+    archive.reader = lambda image: ["KODAK 12.08.79"] if (image < 100).any() else []
+
+    back = session.add_back(album, scan, back_scan, DPI)
+
+    assert back.matched == {"album_s001_p02": "album_s001_p02_back"}
+    assert back.missing == ["album_s001_p01", "album_s001_p03"]
+    assert [p.name for p in (tmp_path / "archive/album/backs").iterdir()] == [
+        "album_s001_p02_back.jpg"
+    ]

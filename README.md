@@ -61,7 +61,7 @@ is filed under, e.g. `[Album Grand-mère · est. 1970s]`:
 | Key | Does |
 |---|---|
 | Enter | Scan the Prints on the glass |
-| `b` | Scan the **Backs** (at `back_dpi`, 300 by default: half the time of 600, enough for printed dates): flip every Print in place, then Enter. Each Back is paired with its front even if it moved a little; one that can't be paired is kept and reported |
+| `b` | Scan the **Backs** (at `back_dpi`, 300 by default: half the time of 600, enough for printed dates): flip every Print in place, then Enter. Each Back is paired with its front even if it moved a little; one that can't be paired is kept and reported. You don't have to flip them all: a Print left face up, or taken off the glass, just gets no Back |
 | `d` | Date the **latest Scan** of the current Source, even one from an earlier Session (`1985-06-15`, `1985-06`, `1985`, `1980s`, `~1985`; empty clears it). Extracts already dated by hand or by their Back keep their date. It isn't carried over: each Scan starts undated |
 | `o` | Switch to another Source, or create one |
 | `c` | Recalibrate, e.g. after switching between lid and cloth or cleaning the glass |

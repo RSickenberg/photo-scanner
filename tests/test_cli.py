@@ -13,7 +13,8 @@ TWO_PRINTS = [FakePrint((300, 300), (450, 300)), FakePrint((600, 1200), (300, 45
 
 
 class FakeScanner:
-    """First Scan: the empty glass (calibration). Then two Prints each time."""
+    """First Scan: the empty glass (calibration). Then two Prints each time, with a
+    new picture on each: a Back pass shows them flipped, not the same fronts."""
 
     name = "fake:scanner"
 
@@ -22,8 +23,10 @@ class FakeScanner:
 
     def scan(self, dpi, *, deep=False):
         self.calls += 1
-        empty = self.calls == 1
-        image = make_scan([], glass_dust=[(1100, 150)]) if empty else make_scan(TWO_PRINTS)
+        if self.calls == 1:
+            image = make_scan([], glass_dust=[(1100, 150)])
+        else:
+            image = make_scan(TWO_PRINTS, seed=self.calls)
         # The synthetic Scans are drawn at 150 dpi; like a real scanner, other
         # resolutions give bigger or smaller images of the same glass.
         return cv2.resize(image, None, fx=dpi / 150, fy=dpi / 150, interpolation=cv2.INTER_AREA)
