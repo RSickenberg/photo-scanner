@@ -1,6 +1,6 @@
 {
   "name": "photo-scanner",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "Release tooling only: the app itself is Python (see pyproject.toml).",
   "repository": {

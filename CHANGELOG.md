@@ -1,11 +1,17 @@
 # Changelog
 
-## [v2.1.0](https://github.com/RSickenberg/photo-scanner/compare/v2.0.3...v2.1.0)
+## [v2.1.1](https://github.com/RSickenberg/photo-scanner/compare/v2.1.0...v2.1.1)
+
+- fix(backs): a Print left face up or taken off the glass gets no Back [`1597daa`](https://github.com/RSickenberg/photo-scanner/commit/1597daad4619c1a93d019044140663be2548931c)
+- fix(detect): don't take a photo's colour for the lid when Prints cover the glass edges [`e8693e5`](https://github.com/RSickenberg/photo-scanner/commit/e8693e56759f9b54969e2f2578bffd89bca2a9c9)
+
+## [v2.1.0](https://github.com/RSickenberg/photo-scanner/compare/v2.0.3...v2.1.0) (2026-09-24)
 
 - feat(session): d dates the latest Scan, never over hand or Back dates [`7fad99a`](https://github.com/RSickenberg/photo-scanner/commit/7fad99a9c3466bbe3e9b61481806b8f5dea1de95)
 - refactor: simpler archive, backup and command line [`182b091`](https://github.com/RSickenberg/photo-scanner/commit/182b091056a81dd652bdd5880c429858cc0e6ad2)
 - fix: don't create a Source on a typo; reject config values of the wrong kind [`62bfa61`](https://github.com/RSickenberg/photo-scanner/commit/62bfa61d5bb69ba12ce63d6ea404e59e9a3c50c8)
 - refactor(detect): Region methods, one caption code path, shared helpers [`27a0043`](https://github.com/RSickenberg/photo-scanner/commit/27a0043ca442654bcfc5adf7422045663b7dc5a0)
+- chore(release): 2.1.0 [`0619bd7`](https://github.com/RSickenberg/photo-scanner/commit/0619bd7dc0eabbe7bf3fdf124cf6ff7bf75b7add)
 
 ## [v2.0.3](https://github.com/RSickenberg/photo-scanner/compare/v2.0.2...v2.0.3) (2026-09-24)
 
