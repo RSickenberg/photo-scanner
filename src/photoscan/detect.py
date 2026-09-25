@@ -428,23 +428,25 @@ def _lab(img: np.ndarray) -> np.ndarray:
 def _raw_mask(img: np.ndarray, calibration: Calibration | None) -> np.ndarray:
     """White where something differs from the glass/lid background, pixel by pixel."""
     lab = _lab(img)
-    background, noise = _background(lab)
-    unlike_lid = np.linalg.norm(lab - background, axis=-1)
     if calibration is None:
+        background, noise = _background(lab)
         # Not Otsu: a high-contrast photo drags Otsu's split far above pale frames
         # and skies, which then get cut off as if they were background.
-        mask = unlike_lid > max(_MIN_CONTRAST, _NOISE_FACTOR * noise)
+        mask = np.linalg.norm(lab - background, axis=-1) > max(_MIN_CONTRAST, _NOISE_FACTOR * noise)
     else:
         reference = calibration.reference
         if reference.shape != lab.shape:  # calibrated at another dpi
             reference = cv2.resize(reference, lab.shape[1::-1], interpolation=cv2.INTER_AREA)
+        from_glass = np.linalg.norm(lab - reference, axis=-1)
+        background = _lid_colour(lab, from_glass, calibration)
+        unlike_lid = np.linalg.norm(lab - background, axis=-1)
         # A Print must differ from the empty glass AND from the Scan's own
         # background colour. The reference alone isn't enough: Prints (thick
         # Polaroids especially) lift the lid, which then shades the gaps between
         # them a little differently than during calibration, enough to join two
         # Prints 2.5 mm apart (real LiDE 400 Scan, 2026-09-24). The colour test
         # rejects that shade; the reference test rejects edge vignetting and lint.
-        unlike_glass = np.linalg.norm(lab - reference, axis=-1) > calibration.threshold
+        unlike_glass = from_glass > calibration.threshold
         mask = unlike_glass & (unlike_lid > _MIN_CONTRAST)
     return mask.astype(np.uint8) * 255
 
@@ -482,13 +484,38 @@ def _background(lab: np.ndarray) -> tuple[np.ndarray, float]:
             lab[:, -4:].reshape(-1, 3),
         ]
     )
-    quantised = (border // 8).astype(np.int32)
-    keys, counts = np.unique(quantised, axis=0, return_counts=True)
-    winner = keys[counts.argmax()]
-    pixels = border[(quantised == winner).all(axis=1)]
+    pixels = _mode_pixels(border)
     colour = pixels.mean(axis=0)
     noise = float(np.percentile(np.linalg.norm(pixels - colour, axis=-1), 99))
     return colour, noise
+
+
+def _lid_colour(lab: np.ndarray, from_glass: np.ndarray, calibration: Calibration) -> np.ndarray:
+    """The Scan's own lid colour, with a calibration to check it against.
+
+    Normally the most common colour along the Scan's edge. But Prints can cover
+    nearly all of the edge (6% left on a real Scan), and that "lid colour" then
+    came out as a photo's near-black. So when it disagrees with the calibrated
+    lid, it's taken instead where the Scan still looks like the empty glass
+    (loosely, to follow a lid sitting a little differently).
+    """
+    colour = np.array(calibration.colour, np.float32)
+    edge, _ = _background(lab)
+    if np.linalg.norm(edge - colour) <= 2 * calibration.threshold:
+        return edge
+    lid_like = lab[from_glass < 2 * calibration.threshold]
+    return _mode_colour(lid_like) if len(lid_like) >= 0.01 * from_glass.size else colour
+
+
+def _mode_pixels(pixels: np.ndarray) -> np.ndarray:
+    """The pixels of the most common colour (Lab, in bins of 8 units)."""
+    quantised = (pixels // 8).astype(np.int32)
+    keys, counts = np.unique(quantised, axis=0, return_counts=True)
+    return pixels[(quantised == keys[counts.argmax()]).all(axis=1)]
+
+
+def _mode_colour(pixels: np.ndarray) -> np.ndarray:
+    return _mode_pixels(pixels).mean(axis=0)
 
 
 def _robust_p99(values: np.ndarray) -> float:

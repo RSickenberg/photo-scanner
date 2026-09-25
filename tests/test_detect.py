@@ -307,3 +307,29 @@ def test_prints_joined_by_a_shadow_in_a_narrow_gap_are_split(calibrated):
         pytest.approx((500, 700), abs=8),
         pytest.approx((250, 500), abs=8),
     ]
+
+
+def test_prints_covering_the_glass_edges_do_not_fool_the_lid_colour():
+    # Real case (2026-09-25): four Prints filling the glass, touching nearly every
+    # edge. Only 6% of the Scan's edge was still lid, so the "lid colour" taken
+    # from the edge came out as a photo's near-black: every dark area inside the
+    # photos then read as lid, and the four Prints were cut into 8 pieces.
+    dark = (25, 25, 28)
+    prints = [
+        FakePrint((300, 430), (600, 860), frame=dark),
+        FakePrint((958, 430), (634, 860), frame=dark),
+        FakePrint((300, 1327), (600, 854), frame=dark),
+        FakePrint((958, 1327), (634, 854), frame=dark),
+    ]  # 40 px (~7 mm) gaps, flush with every edge of the glass
+    empty = make_scan([], background=WHITE, seed=1)
+    scan = make_scan(prints, background=WHITE, seed=2)
+
+    regions = find_prints(scan, DPI, calibration=calibrate(empty, DPI))
+
+    assert len(regions) == 4
+    assert [tuple(round(s) for s in r.size) for r in regions] == [
+        pytest.approx((600, 860), abs=10),
+        pytest.approx((634, 860), abs=10),
+        pytest.approx((600, 854), abs=10),
+        pytest.approx((634, 854), abs=10),
+    ]
