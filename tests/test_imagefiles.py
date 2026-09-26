@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 import numpy as np
@@ -6,7 +7,15 @@ import tifffile
 from PIL import ExifTags, Image
 
 from photoscan.dates import PhotoDate
-from photoscan.imagefiles import Meta, read_meta, read_tiff, write_jpeg, write_tiff
+from photoscan.imagefiles import (
+    Meta,
+    read_meta,
+    read_tiff,
+    read_tiff_pages,
+    replace_tiff,
+    write_jpeg,
+    write_tiff,
+)
 
 SCANNED = datetime(2026, 9, 24, 20, 15, 0)
 IMAGE = np.full((40, 60, 3), 128, np.uint8)
@@ -83,3 +92,34 @@ def test_jpeg_from_16_bit_is_8_bit(tmp_path):
     write_jpeg(path, IMAGE.astype(np.uint16) * 257, _meta())
     assert Image.open(path).mode == "RGB"
     assert Image.open(path).info["dpi"] == pytest.approx((600, 600))
+
+
+def test_tiffs_use_the_horizontal_predictor(tmp_path):
+    # Lossless, read by every TIFF reader, and ~30% smaller on real Scans.
+    path = tmp_path / "x.tif"
+    write_tiff(path, IMAGE, _meta())
+
+    with tifffile.TiffFile(path) as tif:
+        assert tif.pages[0].predictor == 2
+
+
+def test_a_tiff_can_hold_a_grey_image_and_a_colour_thumbnail(tmp_path):
+    path, grey, small = tmp_path / "x.tif", IMAGE[..., 0], IMAGE[::4, ::4]
+    write_tiff(path, grey, _meta(), small)
+
+    pages, meta = read_tiff_pages(path)
+
+    assert [p.shape for p in pages] == [grey.shape, small.shape]
+    assert meta == _meta()
+
+
+def test_replacing_a_tiff_keeps_its_modification_time(tmp_path):
+    path = tmp_path / "x.tif"
+    write_tiff(path, IMAGE, _meta())
+    os.utime(path, (978307200, 978307200))
+
+    replace_tiff(path, [IMAGE[..., 0]], _meta())
+
+    assert read_tiff(path)[0].shape == IMAGE.shape[:2]
+    assert path.stat().st_mtime == 978307200
+    assert list(tmp_path.iterdir()) == [path]  # no leftover partial file

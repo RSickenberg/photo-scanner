@@ -1,7 +1,16 @@
 import numpy as np
 import pytest
 
-from photoscan.detect import Region, calibrate, cut, find_prints, match_backs, repair_dust
+from photoscan.detect import (
+    Region,
+    calibrate,
+    calibrate_from,
+    cut,
+    find_prints,
+    glass_parts,
+    match_backs,
+    repair_dust,
+)
 from tests.synthetic import DARK, WHITE, FakePrint, make_scan
 
 DPI = 150
@@ -128,6 +137,21 @@ def test_calibration_measures_the_background_and_finds_glass_dust():
     for x, y in GLASS_DUST:
         assert calibration.dust[y, x]
     assert calibration.noise < 5
+
+
+def test_a_calibration_from_its_stored_parts_equals_one_from_the_whole_scan():
+    # Calibrations are kept as a grey image and a colour thumbnail, not the whole Scan.
+    empty = make_scan([], background=WHITE, glass_dust=GLASS_DUST)
+
+    whole, parts = calibrate(empty, DPI), calibrate_from(*glass_parts(empty), DPI)
+
+    for name in ("reference", "dust", "contrast"):
+        assert np.array_equal(getattr(whole, name), getattr(parts, name))
+    assert (whole.colour, whole.noise, whole.dust_specks) == (
+        parts.colour,
+        parts.noise,
+        parts.dust_specks,
+    )
 
 
 def test_calibrated_detection_ignores_vignetting_at_the_glass_edge():

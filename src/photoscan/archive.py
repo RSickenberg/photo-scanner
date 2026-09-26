@@ -15,8 +15,8 @@ corrected without renaming (and re-uploading) anything.
 import json
 import re
 import unicodedata
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -36,7 +36,16 @@ from photoscan.detect import (
     repair_dust,
     same_picture,
 )
-from photoscan.imagefiles import Meta, read_jpeg, read_tiff, write_jpeg, write_tiff
+from photoscan.imagefiles import (
+    Meta,
+    is_compact,
+    read_jpeg,
+    read_tiff,
+    read_tiff_pages,
+    replace_tiff,
+    write_jpeg,
+    write_tiff,
+)
 
 Reader = Callable[[np.ndarray], list[str]]
 
@@ -109,8 +118,9 @@ class Archive:
         """Keep an empty-glass Scan under `cal_id` and learn from it."""
         folder = self.archive / "_calibrations"
         folder.mkdir(parents=True, exist_ok=True)
-        write_tiff(folder / f"{cal_id}.tif", empty, Meta("Calibration", datetime.now(), dpi))
-        self._calibrations[cal_id] = detect.calibrate(empty, dpi)
+        grey, small = detect.glass_parts(empty)
+        write_tiff(folder / f"{cal_id}.tif", grey, Meta("Calibration", datetime.now(), dpi), small)
+        self._calibrations[cal_id] = detect.calibrate_from(grey, small, dpi)
         return self._calibrations[cal_id]
 
     def calibration(self, cal_id: str | None) -> Calibration | None:
@@ -121,8 +131,10 @@ class Archive:
             path = self.archive / "_calibrations" / f"{cal_id}.tif"
             if not path.exists():
                 return None
-            empty, meta = read_tiff(path)
-            self._calibrations[cal_id] = detect.calibrate(empty, meta.dpi)
+            pages, meta = read_tiff_pages(path)
+            if len(pages) == 1:  # the whole empty-glass Scan, as kept before 2.3
+                pages = detect.glass_parts(pages[0])
+            self._calibrations[cal_id] = detect.calibrate_from(*pages, meta.dpi)
         return self._calibrations[cal_id]
 
     def recent_calibration(
@@ -542,3 +554,37 @@ def _now() -> str:
 def slugify(name: str) -> str:
     ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-") or "untitled"
+
+
+@dataclass
+class CompactReport:
+    rewritten: list[Path] = field(default_factory=list)
+    bytes_before: int = 0
+    bytes_after: int = 0
+
+
+def compact(
+    root: Path,
+    *,
+    only: Callable[[Path], bool] = lambda path: True,
+    progress: Callable[[list[Path]], Iterable[Path]] = lambda files: files,
+) -> CompactReport:
+    """Rewrite the TIFFs of earlier versions under `root` (a local folder or the
+    NAS) in today's smaller forms: the predictor on every TIFF, calibrations as
+    their `glass_parts`. Lossless: each file is replaced only once the new one
+    reads back identical. `only` picks the files; `progress` wraps them."""
+    archive = root / "archive"
+    calibrations = sorted((archive / "_calibrations").glob("*.tif"))
+    images = sorted(archive.glob("[!_]*/scans/*.tif")) + sorted(archive.glob("[!_]*/masters/*.tif"))
+    todo = [p for p in calibrations if only(p) and not is_compact(p, pages=2)]
+    todo += [p for p in images if only(p) and not is_compact(p, pages=1)]
+    report = CompactReport()
+    for path in progress(todo):
+        report.bytes_before += path.stat().st_size
+        pages, meta = read_tiff_pages(path)
+        if path.parent.name == "_calibrations" and len(pages) == 1:
+            pages = list(detect.glass_parts(pages[0]))
+        replace_tiff(path, pages, meta)
+        report.bytes_after += path.stat().st_size
+        report.rewritten.append(path)
+    return report

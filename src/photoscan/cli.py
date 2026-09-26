@@ -12,7 +12,8 @@ import numpy as np
 import typer
 
 from photoscan import backup, config, scanners
-from photoscan.archive import Archive, ScanResult, Session, Source
+from photoscan.archive import Archive, CompactReport, ScanResult, Session, Source
+from photoscan.archive import compact as archive_compact
 from photoscan.dates import PhotoDate
 from photoscan.detect import Region
 from photoscan.imagefiles import to_8bit
@@ -201,6 +202,43 @@ def _progress_by_size(label: str) -> Callable[[list[Path]], Iterator[Path]]:
                 bar.update(sizes[path])
 
     return progress
+
+
+@app.command()
+def compact() -> None:
+    """Shrink the TIFFs of earlier versions, losslessly, here and on the NAS."""
+    cfg = _config()
+    progress = _progress_by_size("Compacting {} file(s) on this Mac")
+    report = archive_compact(cfg.output_dir, progress=progress)
+    _echo_compacted(report)
+    if not cfg.nas_dir:
+        return
+    if not cfg.nas_dir.is_dir():
+        typer.secho(
+            f"NAS folder not found (is the share mounted?): {cfg.nas_dir}\n"
+            "Its copies weren't compacted; run `photoscan compact` again once it is.",
+            fg="yellow",
+        )
+        return
+    # Files still on this Mac reach the NAS by sync; only the NAS copies of
+    # pruned files are compacted there, in place.
+    synced = backup.sync(
+        cfg.output_dir, cfg.nas_dir, progress=_progress_by_size("Copying {} file(s) to the NAS")
+    )
+    progress = _progress_by_size("Compacting {} file(s) on the NAS")
+
+    def pruned(path: Path) -> bool:
+        return not (cfg.output_dir / path.relative_to(cfg.nas_dir)).exists()
+
+    _echo_compacted(archive_compact(cfg.nas_dir, only=pruned, progress=progress))
+    if synced.failed:
+        typer.secho(f"{len(synced.failed)} file(s) failed to copy; run `photoscan sync`", fg="red")
+        raise typer.Exit(1)
+
+
+def _echo_compacted(report: CompactReport) -> None:
+    saved = (report.bytes_before - report.bytes_after) / 1e6
+    typer.echo(f"{len(report.rewritten)} file(s) compacted, {saved:.0f} MB saved")
 
 
 @app.command()

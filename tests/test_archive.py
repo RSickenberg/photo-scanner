@@ -1,14 +1,15 @@
 import json
-from datetime import date
+import os
+from datetime import date, datetime
 
 import numpy as np
 import pytest
 import tifffile
 from PIL import ExifTags, Image
 
-from photoscan.archive import Archive
+from photoscan.archive import Archive, compact
 from photoscan.dates import PhotoDate
-from photoscan.imagefiles import read_meta
+from photoscan.imagefiles import Meta, read_meta, read_tiff, write_tiff
 from tests.synthetic import WHITE, FakePrint, make_scan
 
 DPI = 150
@@ -214,6 +215,26 @@ def test_session_records_its_calibrations_and_scans(archive, tmp_path):
     assert (tmp_path / "archive/_calibrations/2026-09-24_01_cal_01.tif").exists()
     assert record["scans"] == [{"source": "album", "scan": "album_s001"}]
     assert _record(archive.source("Album"))["scans"][0]["calibration"] == "2026-09-24_01_cal_01"
+
+
+def test_a_calibration_is_kept_as_a_grey_image_and_a_colour_thumbnail(archive, tmp_path):
+    empty = make_scan([], glass_dust=[(1100, 150)])
+    archive.start_session(DAY).calibrate(empty, DPI)
+
+    with tifffile.TiffFile(tmp_path / "archive/_calibrations/2026-09-24_01_cal_01.tif") as tif:
+        grey, thumbnail = tif.pages
+        assert grey.shape == empty.shape[:2]
+        assert thumbnail.shape[0] == 1200 and thumbnail.shape[2] == 3  # the detection size
+    assert Archive(tmp_path).calibration("2026-09-24_01_cal_01").dust_specks == 1
+
+
+def test_a_calibration_kept_as_a_whole_scan_by_earlier_versions_still_loads(archive, tmp_path):
+    folder = tmp_path / "archive/_calibrations"
+    folder.mkdir(parents=True)
+    empty = make_scan([], glass_dust=[(1100, 150)])
+    write_tiff(folder / "2026-09-24_01_cal_01.tif", empty, Meta("Calibration", datetime.now(), DPI))
+
+    assert archive.calibration("2026-09-24_01_cal_01").dust_specks == 1
 
 
 def test_second_session_of_the_day_gets_its_own_number(archive):
@@ -550,3 +571,69 @@ def test_prints_removed_from_the_glass_get_no_blank_back(archive, tmp_path):
     assert [p.name for p in (tmp_path / "archive/album/backs").iterdir()] == [
         "album_s001_p02_back.jpg"
     ]
+
+
+# --- Compacting files from earlier versions ---------------------------------------
+
+
+def _archive_from_before_2_3(archive, tmp_path, monkeypatch):
+    """TIFFs written the way versions before 2.3 did: no predictor, and each
+    calibration as the whole empty-glass Scan."""
+    write = tifffile.TiffWriter.write
+    with monkeypatch.context() as m:
+        m.setattr(
+            tifffile.TiffWriter,
+            "write",
+            lambda self, *a, **k: write(self, *a, **{**k, "predictor": None}),
+        )
+        empty = make_scan([], glass_dust=[(640, 1100)], seed=5)
+        folder = tmp_path / "archive/_calibrations"
+        folder.mkdir(parents=True)
+        cal = Meta("Calibration", datetime.now(), DPI)
+        write_tiff(folder / "2026-09-24_01_cal_01.tif", empty, cal)
+        session = archive.start_session(DAY)
+        session.use_calibration("2026-09-24_01_cal_01")
+        scan = make_scan(TWO_PRINTS, glass_dust=[(640, 1100)])
+        session.add_scan(archive.source("Album"), scan, DPI)
+    tiffs = sorted((tmp_path / "archive").rglob("*.tif"))
+    for path in tiffs:
+        os.utime(path, (978307200, 978307200))
+    return tiffs
+
+
+def test_compact_rewrites_tiffs_from_earlier_versions_losslessly(archive, tmp_path, monkeypatch):
+    tiffs = _archive_from_before_2_3(archive, tmp_path, monkeypatch)
+    before = {p: (read_tiff(p)[0], read_meta(p)) for p in tiffs}
+    calibration = Archive(tmp_path).calibration("2026-09-24_01_cal_01")
+
+    report = compact(tmp_path)
+
+    assert sorted(report.rewritten) == tiffs  # 1 calibration, 1 Scan, 2 masters
+    for path in tiffs:
+        with tifffile.TiffFile(path) as tif:
+            assert {p.predictor for p in tif.pages} == {2}
+        assert path.stat().st_mtime == 978307200
+        if path.parent.name != "_calibrations":
+            image, meta = read_tiff(path)
+            assert np.array_equal(image, before[path][0])
+            assert meta == before[path][1]
+    after = Archive(tmp_path).calibration("2026-09-24_01_cal_01")
+    for name in ("reference", "dust", "contrast"):
+        assert np.array_equal(getattr(after, name), getattr(calibration, name))
+    assert read_meta(tmp_path / "archive/_calibrations/2026-09-24_01_cal_01.tif").dpi == DPI
+
+
+def test_compact_leaves_compact_files_alone(archive, tmp_path):
+    session = archive.start_session(DAY)
+    session.calibrate(make_scan([]), DPI)
+    session.add_scan(archive.source("Album"), make_scan(TWO_PRINTS), DPI)
+
+    assert compact(tmp_path).rewritten == []
+
+
+def test_compact_only_touches_the_files_it_is_given(archive, tmp_path, monkeypatch):
+    _archive_from_before_2_3(archive, tmp_path, monkeypatch)
+
+    report = compact(tmp_path, only=lambda path: path.parent.name == "masters")
+
+    assert [p.parent.name for p in report.rewritten] == ["masters", "masters"]

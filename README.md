@@ -90,7 +90,7 @@ can redo the cuts later.
   archive/album-grand-mere/masters/album-grand-mere_s001_p01.tif   lossless Extracts
   archive/album-grand-mere/backs/album-grand-mere_s001_p01_back.jpg
   archive/_sessions/2026-09-24_01.json                             each sitting
-  archive/_calibrations/2026-09-24_01_cal_01.tif                   empty-glass Scans
+  archive/_calibrations/2026-09-24_01_cal_01.tif                   empty glass: grey + colour thumbnail
 ```
 
 Names never contain the Photo date, so fixing a date never renames a file or
@@ -152,6 +152,7 @@ found) and the Scans it made. Records are never pruned.
 | `photoscan recut archive/*/scans/*.tif` | Redo the Extracts (and Backs) of existing Scans |
 | `photoscan rotate FILE… --degrees 90` | Turn Extracts clockwise (master and photo together) |
 | `photoscan sync` | Copy anything not yet on the NAS, verifying each file, with a progress bar |
+| `photoscan compact` | Shrink TIFFs made before 2.3 (about 25% smaller, 70% for calibrations), losslessly, here and on the NAS |
 | `photoscan prune` | Delete local files whose NAS copy is verified identical |
 | `photoscan prune --force` | Delete **all** local images without checking the NAS. Warns how many were never backed up; `--yes` skips the question |
 | `photoscan devices` / `config` | Scanner list / config file |

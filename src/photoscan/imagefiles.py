@@ -10,6 +10,7 @@ ImageDescription. So:
 - EXIF DateTime keeps the scan time, for the record.
 """
 
+import os
 import re
 import unicodedata
 import xml.etree.ElementTree as ET
@@ -62,22 +63,56 @@ class Meta:
         return f"{self.title} - {self.photo_date} ({how})"
 
 
-def write_tiff(path: Path, image: np.ndarray, meta: Meta) -> None:
-    """Lossless (deflate) RGB TIFF, 8 or 16 bits per channel as given."""
+def write_tiff(path: Path, image: np.ndarray, meta: Meta, *more: np.ndarray) -> None:
+    """Lossless TIFF, 8 or 16 bits per channel as given: deflate with the
+    horizontal predictor, which every TIFF reader supports (~30% smaller on real
+    Scans). `more` images become further pages, e.g. a calibration's thumbnail."""
     xmp = _xmp(meta)
-    tifffile.imwrite(
-        path,
-        image,
-        photometric="rgb",
-        compression="zlib",
-        resolution=(meta.dpi, meta.dpi),
-        resolutionunit="INCH",
-        datetime=meta.scanned,
-        software=_SOFTWARE,
-        description=_ascii(meta.description),
-        metadata=None,
-        extratags=[(_XMP_TAG, "B", len(xmp), xmp, True)],
-    )
+    with tifffile.TiffWriter(path) as tif:
+        tif.write(
+            image,
+            photometric=_photometric(image),
+            compression="zlib",
+            predictor=True,
+            resolution=(meta.dpi, meta.dpi),
+            resolutionunit="INCH",
+            datetime=meta.scanned,
+            software=_SOFTWARE,
+            description=_ascii(meta.description),
+            metadata=None,
+            extratags=[(_XMP_TAG, "B", len(xmp), xmp, True)],
+        )
+        for page in more:
+            tif.write(
+                page,
+                photometric=_photometric(page),
+                compression="zlib",
+                predictor=True,
+                metadata=None,
+            )
+
+
+def replace_tiff(path: Path, pages: list[np.ndarray], meta: Meta) -> None:
+    """Rewrite `path` as `pages`, keeping its modification time. The file is only
+    replaced once the new one reads back identical, so a failure leaves it as it was."""
+    stat = path.stat()
+    partial = path.with_name(path.name + ".partial")
+    try:
+        write_tiff(partial, pages[0], meta, *pages[1:])
+        written, written_meta = read_tiff_pages(partial)
+        same = len(written) == len(pages) and all(map(np.array_equal, written, pages))
+        if not same or written_meta != meta:
+            raise ValueError(f"{path.name} didn't read back identical; left as it was")
+        os.utime(partial, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        partial.replace(path)
+    finally:
+        partial.unlink(missing_ok=True)
+
+
+def is_compact(path: Path, pages: int) -> bool:
+    """Whether a TIFF already has `pages` pages, all with the predictor."""
+    with tifffile.TiffFile(path) as tif:
+        return len(tif.pages) == pages and all(p.predictor == 2 for p in tif.pages)
 
 
 def to_8bit(image: np.ndarray) -> np.ndarray:
@@ -105,14 +140,19 @@ def write_jpeg(path: Path, image: np.ndarray, meta: Meta, *, quality: int = 95) 
 
 
 def read_tiff(path: Path) -> tuple[np.ndarray, Meta]:
+    pages, meta = read_tiff_pages(path)
+    return pages[0], meta
+
+
+def read_tiff_pages(path: Path) -> tuple[list[np.ndarray], Meta]:
+    """Every page of a TIFF, and the metadata of the first."""
     with tifffile.TiffFile(path) as tif:
-        page = tif.pages[0]
-        image = page.asarray()
-        tags = page.tags
+        tags = tif.pages[0].tags
         num, den = tags["XResolution"].value if "XResolution" in tags else (0, 1)
         stamp = tags["DateTime"].value if "DateTime" in tags else None
         xmp = tags[_XMP_TAG].value if _XMP_TAG in tags else None
-    return image, _meta_from(xmp, stamp, round(num / den))
+        pages = [page.asarray() for page in tif.pages]
+    return pages, _meta_from(xmp, stamp, round(num / den))
 
 
 def read_jpeg(path: Path) -> np.ndarray:
@@ -196,6 +236,10 @@ def _read_xmp(xmp: bytes | str | None) -> dict[str, str]:
         "date_source": text(".//photoscan:DateSource"),
     }
     return {k: v for k, v in fields.items() if v}
+
+
+def _photometric(image: np.ndarray) -> str:
+    return "rgb" if image.ndim == 3 else "minisblack"
 
 
 def _ascii(text: str) -> str:

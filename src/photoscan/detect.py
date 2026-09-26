@@ -110,13 +110,25 @@ class Calibration:
 
 def calibrate(empty: np.ndarray, dpi: int) -> Calibration:
     """Learn the background and the glass dust from a Scan of the empty glass."""
+    return calibrate_from(*glass_parts(empty), dpi)
+
+
+def glass_parts(empty: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """All a calibration reads from the empty glass: the full-resolution grey
+    image (for dust) and the colour image at detection size (for the background).
+    A third of the size of the whole Scan, whose noise doesn't compress."""
     empty8 = to_8bit(empty)
-    reference = _lab(_downscale(empty8)[0])
+    return cv2.cvtColor(empty8, cv2.COLOR_RGB2GRAY), _downscale(empty8)[0]
+
+
+def calibrate_from(grey: np.ndarray, small: np.ndarray, dpi: int) -> Calibration:
+    """`calibrate`, from the `glass_parts` of the empty glass."""
+    reference = _lab(small)
     # Noise = what's left once slow shading (vignetting, lid gradient) is removed.
     # Comparing two Scans adds two such noises, hence the sqrt(2).
     shading = cv2.GaussianBlur(reference, (0, 0), 15)
     single = _robust_p99(np.linalg.norm(reference - shading, axis=-1))
-    contrast = _speck_contrast(cv2.cvtColor(empty8, cv2.COLOR_RGB2GRAY), dpi)
+    contrast = _speck_contrast(grey, dpi)
     dust, specks = _find_dust(contrast, dpi)
     return Calibration(
         reference=reference,

@@ -2,6 +2,7 @@ import json
 
 import cv2
 import pytest
+import tifffile
 from PIL import ExifTags, Image
 from typer.testing import CliRunner
 
@@ -215,6 +216,30 @@ def test_prune_shows_what_it_verifies(setup):
 
     assert "Verifying" in result.output
     assert not list(local.glob("photos/*/*.jpg"))
+
+
+def test_compact_shrinks_local_files_and_the_nas_copies_of_pruned_ones(setup, monkeypatch):
+    local, nas, _, _ = setup
+    write = tifffile.TiffWriter.write
+    with monkeypatch.context() as m:  # TIFFs as versions before 2.3 wrote them
+        m.setattr(
+            tifffile.TiffWriter,
+            "write",
+            lambda self, *a, **k: write(self, *a, **{**k, "predictor": None}),
+        )
+        run("session", "Album", "--no-calibrate", input="\n\n\nq\n")  # s001, s002
+        run("prune", "--yes")
+        run("session", "Album", "--no-calibrate", input="\nq\n")  # s003, still local
+
+    result = run("compact")
+
+    assert "file(s) compacted" in result.output
+    for tiff in nas.glob("archive/album/*/*.tif"):
+        with tifffile.TiffFile(tiff) as tif:
+            assert tif.pages[0].predictor == 2, tiff.name
+    kept = "archive/album/scans/album_s003.tif"
+    assert (local / kept).read_bytes() == (nas / kept).read_bytes()  # synced
+    assert not (local / "archive/album/scans/album_s002.tif").exists()  # still pruned
 
 
 def test_forced_prune_warns_about_files_not_on_the_nas(setup, tmp_path, monkeypatch):
