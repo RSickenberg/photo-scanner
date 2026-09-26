@@ -49,6 +49,21 @@ def test_a_changed_file_is_copied_again(local, nas):
     assert (nas / "2026-09-24_grandma/extracts/grandma_s001_p01.jpg").read_bytes() == b"rotated"
 
 
+def test_sync_reports_progress_on_the_files_it_copies(local, nas):
+    sync(local, nas)
+    extract = local / "2026-09-24_grandma/extracts/grandma_s001_p01.jpg"
+    extract.write_bytes(b"rotated")
+    seen = []
+
+    def progress(pending):
+        seen.append([(p.name, p.stat().st_size) for p in pending])
+        return pending
+
+    sync(local, nas, progress=progress)
+
+    assert seen == [[("grandma_s001_p01.jpg", 7)]]  # only what needs copying, with its size
+
+
 def test_sync_fails_clearly_when_the_nas_is_not_mounted(local, tmp_path):
     with pytest.raises(NasUnavailable):
         sync(local, tmp_path / "Volumes" / "photos")
@@ -66,6 +81,21 @@ def test_prune_deletes_only_files_verified_on_the_nas(local, nas):
     assert (session / "scans/grandma_s002.tif").exists()
     assert (session / "extracts/grandma_s001_p01.tif").exists()
     assert (session / "session.json").exists()
+
+
+def test_prune_reports_progress_on_the_files_it_checks(local, nas):
+    sync(local, nas)
+    (local / "2026-09-24_grandma/scans/grandma_s002.tif").write_bytes(b"not backed up yet")
+    seen = []
+
+    def progress(candidates):
+        seen.append(sorted(p.name for p in candidates))
+        return candidates
+
+    prune(local, nas, progress=progress)
+
+    # backed-up images only: never records, nor files the NAS doesn't have
+    assert seen == [["grandma_s001.tif", "grandma_s001_p01.jpg", "grandma_s001_p01.tif"]]
 
 
 def test_sync_keeps_file_modification_times(local, nas):

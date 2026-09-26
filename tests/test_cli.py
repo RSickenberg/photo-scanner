@@ -192,6 +192,31 @@ def test_rotate_command(setup):
     run("rotate", str(local / "photos/album/album_s002_p01.jpg"), "--degrees", "180")
 
 
+def test_sync_shows_what_it_copies(setup, tmp_path, monkeypatch):
+    local, nas, _, _ = setup
+    cfg = tmp_path / "offline.toml"
+    cfg.write_text(f'output_dir = "{local}"\nnas_dir = "{tmp_path / "unmounted"}"\ndpi = 150\n')
+    monkeypatch.setenv("PHOTOSCAN_CONFIG", str(cfg))
+    run("session", "Album", "--no-calibrate", input="\n\n\nq\n")  # NAS absent: nothing copied
+    (tmp_path / "unmounted").mkdir()
+
+    result = run("sync")
+
+    assert "Copying" in result.output
+    assert "file(s) copied, 0 failed" in result.output
+    assert list((tmp_path / "unmounted/photos/album").glob("*.jpg"))
+
+
+def test_prune_shows_what_it_verifies(setup):
+    local, _, _, _ = setup
+    run("session", "Album", "--no-calibrate", input="\n\n\nq\n")  # backed up on the way
+
+    result = run("prune", "--yes")
+
+    assert "Verifying" in result.output
+    assert not list(local.glob("photos/*/*.jpg"))
+
+
 def test_forced_prune_warns_about_files_not_on_the_nas(setup, tmp_path, monkeypatch):
     local, _, _, _ = setup
     run("session", "Album", "--no-calibrate", input="\n\n\nq\n")

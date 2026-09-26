@@ -2,6 +2,7 @@
 
 import subprocess
 import tempfile
+from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
@@ -172,10 +173,34 @@ def dates(source: Annotated[str | None, typer.Argument(help="Only this Source")]
 def sync() -> None:
     """Copy everything not yet on the NAS, verifying each file."""
     cfg = _require_nas(_config())
-    report = backup.sync(cfg.output_dir, cfg.nas_dir)
+    typer.echo("Checking which files are new or changed…")
+    progress = _progress_by_size("Copying {} file(s) to the NAS")
+    report = backup.sync(cfg.output_dir, cfg.nas_dir, progress=progress)
     typer.echo(f"{len(report.copied)} file(s) copied, {len(report.failed)} failed")
     if report.failed:
         raise typer.Exit(1)
+
+
+def _progress_by_size(label: str) -> Callable[[list[Path]], Iterator[Path]]:
+    """A progress bar over files, by size: masters dwarf the JPEGs.
+    `label` gets the number of files."""
+
+    def progress(files: list[Path]) -> Iterator[Path]:
+        if not files:
+            return
+        sizes = {p: p.stat().st_size for p in files}
+        with typer.progressbar(
+            length=sum(sizes.values()),
+            label=label.format(len(files)),
+            item_show_func=lambda p: p.name if p else None,
+        ) as bar:
+            for path in files:
+                bar.current_item = path  # shown while it's worked on
+                bar.render_progress()
+                yield path
+                bar.update(sizes[path])
+
+    return progress
 
 
 @app.command()
@@ -205,7 +230,8 @@ def prune(
     cfg = _require_nas(_config())
     if not yes:
         typer.confirm(f"Delete backed-up files from {cfg.output_dir}?", abort=True)
-    deleted = backup.prune(cfg.output_dir, cfg.nas_dir)
+    progress = _progress_by_size("Verifying {} file(s) on the NAS before deleting")
+    deleted = backup.prune(cfg.output_dir, cfg.nas_dir, progress=progress)
     typer.echo(f"{len(deleted)} local file(s) deleted")
 
 

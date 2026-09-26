@@ -11,6 +11,7 @@ import json
 import queue
 import shutil
 import threading
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,16 +31,23 @@ class SyncReport:
     failed: list[Path] = field(default_factory=list)
 
 
-def sync(local: Path, nas: Path) -> SyncReport:
-    """Copy every new or changed local file to the NAS, verifying each copy."""
+def sync(
+    local: Path,
+    nas: Path,
+    progress: Callable[[list[Path]], Iterable[Path]] = lambda pending: pending,
+) -> SyncReport:
+    """Copy every new or changed local file to the NAS, verifying each copy.
+    `progress` wraps the files to copy, e.g. in a progress bar."""
     _require_mounted(nas)
     manifest = _load(local)
     report = SyncReport()
+    digests = {}
     for path in _local_files(local):
-        rel = path.relative_to(local).as_posix()
         digest = _sha256(path)
-        if manifest.get(rel) == digest:
-            continue
+        if manifest.get(path.relative_to(local).as_posix()) != digest:
+            digests[path] = digest
+    for path in progress(list(digests)):
+        rel, digest = path.relative_to(local).as_posix(), digests[path]
         if _copy_verified(path, nas / rel, digest):
             manifest[rel] = digest
             _save(local, manifest)  # after each file: an interrupted sync keeps its progress
@@ -49,16 +57,23 @@ def sync(local: Path, nas: Path) -> SyncReport:
     return report
 
 
-def prune(local: Path, nas: Path) -> list[Path]:
+def prune(
+    local: Path,
+    nas: Path,
+    progress: Callable[[list[Path]], Iterable[Path]] = lambda candidates: candidates,
+) -> list[Path]:
     """Delete local files whose NAS copy is re-verified identical right now.
-    Records (*.json) are always kept."""
+    Records (*.json) are always kept. `progress` wraps the files to check."""
     _require_mounted(nas)
     manifest = _load(local)
     deleted = []
-    for path in _local_files(local):
+    candidates = [
+        p
+        for p in _local_files(local)
+        if p.suffix != _KEEP_SUFFIX and p.relative_to(local).as_posix() in manifest
+    ]
+    for path in progress(candidates):
         rel = path.relative_to(local).as_posix()
-        if path.suffix == _KEEP_SUFFIX or rel not in manifest:
-            continue
         remote = nas / rel
         if _sha256(path) == manifest[rel] and remote.exists() and _sha256(remote) == manifest[rel]:
             path.unlink()
