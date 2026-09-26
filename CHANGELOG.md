@@ -1,9 +1,14 @@
 # Changelog
 
-## [v2.1.1](https://github.com/RSickenberg/photo-scanner/compare/v2.1.0...v2.1.1)
+## [v2.2.0](https://github.com/RSickenberg/photo-scanner/compare/v2.1.1...v2.2.0)
+
+- feat(backup): progress bars for sync and prune [`09cd834`](https://github.com/RSickenberg/photo-scanner/commit/09cd8342e3f49e7593bae15c6b70e26508955fb1)
+
+## [v2.1.1](https://github.com/RSickenberg/photo-scanner/compare/v2.1.0...v2.1.1) (2026-09-25)
 
 - fix(backs): a Print left face up or taken off the glass gets no Back [`1597daa`](https://github.com/RSickenberg/photo-scanner/commit/1597daad4619c1a93d019044140663be2548931c)
 - fix(detect): don't take a photo's colour for the lid when Prints cover the glass edges [`e8693e5`](https://github.com/RSickenberg/photo-scanner/commit/e8693e56759f9b54969e2f2578bffd89bca2a9c9)
+- chore(release): 2.1.1 [`0459893`](https://github.com/RSickenberg/photo-scanner/commit/045989374f0c25d9b8fa8ba5258464035bacb631)
 
 ## [v2.1.0](https://github.com/RSickenberg/photo-scanner/compare/v2.0.3...v2.1.0) (2026-09-24)
 
