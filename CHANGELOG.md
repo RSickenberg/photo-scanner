@@ -1,8 +1,13 @@
 # Changelog
 
-## [v2.2.0](https://github.com/RSickenberg/photo-scanner/compare/v2.1.1...v2.2.0)
+## [v2.3.0](https://github.com/RSickenberg/photo-scanner/compare/v2.2.0...v2.3.0)
+
+- feat(storage): smaller TIFFs, slimmer calibrations, and `photoscan compact` [`bf607da`](https://github.com/RSickenberg/photo-scanner/commit/bf607da5cfdbf05e4ead9ff0c1530cf3214579e9)
+
+## [v2.2.0](https://github.com/RSickenberg/photo-scanner/compare/v2.1.1...v2.2.0) (2026-09-26)
 
 - feat(backup): progress bars for sync and prune [`09cd834`](https://github.com/RSickenberg/photo-scanner/commit/09cd8342e3f49e7593bae15c6b70e26508955fb1)
+- chore(release): 2.2.0 [`692ca47`](https://github.com/RSickenberg/photo-scanner/commit/692ca47f218316a34cde6ae2c1ae20608d5e4dc6)
 
 ## [v2.1.1](https://github.com/RSickenberg/photo-scanner/compare/v2.1.0...v2.1.1) (2026-09-25)
 
